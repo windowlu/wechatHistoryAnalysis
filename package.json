@@ -1,0 +1,58 @@
+{
+  "name": "wechat-history-analysis",
+  "version": "1.0.0",
+  "description": "微信聊天记录一键静态分析系统 — 销售对话智能分析",
+  "main": "dist/cli.js",
+  "bin": {
+    "wechat-analysis": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "ts-node src/cli.ts",
+    "start": "node dist/cli.js",
+    "test": "jest",
+    "lint": "eslint src/**/*.ts",
+    "clean": "rm -rf dist output temp"
+  },
+  "keywords": [
+    "wechat",
+    "chat-analysis",
+    "sales-intelligence",
+    "llm",
+    "offline"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "commander": "^12.0.0",
+    "csv-writer": "^1.6.0",
+    "ejs": "^3.1.10",
+    "glob": "^10.4.0",
+    "pg": "^8.12.0",
+    "chalk": "^4.1.2",
+    "ora": "^5.4.1",
+    "inquirer": "^8.2.6",
+    "fs-extra": "^11.2.0",
+    "dayjs": "^1.11.11",
+    "axios": "^1.7.0",
+    "p-limit": "^3.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/ejs": "^3.1.5",
+    "@types/pg": "^8.11.6",
+    "@types/inquirer": "^9.0.7",
+    "@types/fs-extra": "^11.0.4",
+    "@types/jest": "^29.5.12",
+    "typescript": "^5.4.5",
+    "ts-node": "^10.9.2",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.1.4",
+    "eslint": "^8.57.0",
+    "@typescript-eslint/eslint-plugin": "^7.12.0",
+    "@typescript-eslint/parser": "^7.12.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

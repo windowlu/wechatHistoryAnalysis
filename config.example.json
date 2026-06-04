@@ -1,0 +1,64 @@
+{
+  "extractor": {
+    "customDataPath": "C:\\Users\\YOUR_NAME\\Documents\\WeChat Files",
+    "allowedVersions": ["3.9.x", "3.8.x"]
+  },
+  "decryptor": {
+    "decryptToolPath": "./bin/decrypt-tool.exe",
+    "strategy": "memory",
+    "concurrency": 3
+  },
+  "normalizer": {
+    "keepRawContent": true,
+    "timezoneOffset": 480,
+    "cleaningRules": {
+      "removeControlChars": true,
+      "removeXmlTags": true,
+      "normalizeEmoji": true,
+      "trimWhitespace": true
+    }
+  },
+  "analyzer": {
+    "llm": {
+      "provider": "openai",
+      "apiEndpoint": "https://api.openai.com/v1/chat/completions",
+      "apiKey": "sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "primaryModel": "gpt-4o",
+      "fallbackModel": "gpt-4o-mini",
+      "maxContextLength": 8000,
+      "temperature": 0.3,
+      "timeoutMs": 120000,
+      "maxRetries": 2
+    },
+    "concurrencyLimit": 3,
+    "compressionThreshold": 6000,
+    "batchSize": 10,
+    "enforceJsonMode": true,
+    "validation": {
+      "enableRangeCheck": true,
+      "enableConsistencyCheck": true
+    }
+  },
+  "exporter": {
+    "outputDir": "./output",
+    "exportJsonl": true,
+    "exportCsv": true,
+    "exportHtml": true,
+    "htmlTitle": "微信聊天记录分析报告",
+    "writeToDatabase": false,
+    "database": {
+      "enabled": false,
+      "connectionString": "postgresql://user:pass@localhost:5432/wechat_analysis",
+      "messagesTable": "messages",
+      "analysisTable": "analysis_results",
+      "vectorTable": "message_vectors"
+    },
+    "vector": {
+      "enabled": false,
+      "dimension": 1536,
+      "metric": "cosine"
+    }
+  },
+  "logLevel": "info",
+  "tempDir": "./temp"
+}
