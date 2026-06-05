@@ -12,7 +12,7 @@ import {
   DatabaseFile,
 } from '../types';
 import {
-  getDefaultWeChatDataPath,
+  resolveWeChatDataPath,
   scanAccounts,
   locateDatabases,
   isVersionAllowed,
@@ -32,7 +32,7 @@ export class Extractor {
   async extract(): Promise<ExtractionResult> {
     logger.info('提取层: 开始扫描微信数据目录');
 
-    const dataPath = this.config.customDataPath || getDefaultWeChatDataPath();
+    const dataPath = await resolveWeChatDataPath(this.config.customDataPath);
     logger.debug(`扫描路径: ${dataPath}`);
 
     // 1. 扫描账号
