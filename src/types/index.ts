@@ -64,10 +64,21 @@ export interface ExtractionResult {
 /** 解密策略 */
 export type DecryptStrategy = 'memory' | 'cache' | 'manual';
 
+/** 解密工具类型 */
+export type DecryptToolType = 'generic' | 'pywxdump';
+
 /** 解密层配置 */
 export interface DecryptorConfig {
-  /** 解密工具路径 */
-  decryptToolPath: string;
+  /** 解密工具类型 */
+  toolType: DecryptToolType;
+  /** 通用解密工具可执行文件路径（toolType=generic 时使用） */
+  decryptToolPath?: string;
+  /** Python 可执行文件路径（toolType=pywxdump 时使用，默认 'python'） */
+  pythonPath?: string;
+  /** PyWxDump 模块名或入口路径（toolType=pywxdump 时使用，默认 'pywxdump'） */
+  pywxdumpModule?: string;
+  /** PyWxDump bias 额外参数（如 --deep, --multi） */
+  pywxdumpBiasArgs?: string[];
   /** 优先使用的解密策略 */
   strategy: DecryptStrategy;
   /** 手动提供的密钥（策略为manual时使用） */
@@ -412,34 +423,6 @@ export interface AnalysisResult {
 // 持久层类型
 // ═════════════════════════════════════════════════════════════════════════════
 
-/** 数据库连接配置 */
-export interface DatabaseConfig {
-  /** 是否启用数据库写入 */
-  enabled: boolean;
-  /** 连接字符串 */
-  connectionString: string;
-  /** 消息表名 */
-  messagesTable: string;
-  /** 分析结果表名 */
-  analysisTable: string;
-  /** 向量表名 */
-  vectorTable: string;
-}
-
-/** 向量存储配置 */
-export interface VectorConfig {
-  /** 是否启用向量存储 */
-  enabled: boolean;
-  /** 向量维度 */
-  dimension: number;
-  /** 相似度度量方式 */
-  metric: 'cosine' | 'l2' | 'inner_product';
-  /** Embedding模型端点 */
-  embeddingEndpoint?: string;
-  /** Embedding模型API密钥 */
-  embeddingApiKey?: string;
-}
-
 /** 导出配置 */
 export interface ExportConfig {
   /** 输出目录 */
@@ -448,16 +431,6 @@ export interface ExportConfig {
   exportJsonl: boolean;
   /** 是否导出CSV */
   exportCsv: boolean;
-  /** 是否导出HTML报告 */
-  exportHtml: boolean;
-  /** HTML报告标题 */
-  htmlTitle?: string;
-  /** 是否写入数据库 */
-  writeToDatabase: boolean;
-  /** 数据库配置 */
-  database?: DatabaseConfig;
-  /** 向量配置 */
-  vector?: VectorConfig;
 }
 
 /** 日志级别 */

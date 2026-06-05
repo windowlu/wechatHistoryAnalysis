@@ -4,7 +4,10 @@
     "allowedVersions": ["3.9.x", "3.8.x"]
   },
   "decryptor": {
-    "decryptToolPath": "./bin/decrypt-tool.exe",
+    "toolType": "pywxdump",
+    "pythonPath": "python",
+    "pywxdumpModule": "pywxdump",
+    "pywxdumpBiasArgs": [],
     "strategy": "memory",
     "concurrency": 3
   },
@@ -42,22 +45,7 @@
   "exporter": {
     "outputDir": "./output",
     "exportJsonl": true,
-    "exportCsv": true,
-    "exportHtml": true,
-    "htmlTitle": "微信聊天记录分析报告",
-    "writeToDatabase": false,
-    "database": {
-      "enabled": false,
-      "connectionString": "postgresql://user:pass@localhost:5432/wechat_analysis",
-      "messagesTable": "messages",
-      "analysisTable": "analysis_results",
-      "vectorTable": "message_vectors"
-    },
-    "vector": {
-      "enabled": false,
-      "dimension": 1536,
-      "metric": "cosine"
-    }
+    "exportCsv": true
   },
   "logLevel": "info",
   "tempDir": "./temp"

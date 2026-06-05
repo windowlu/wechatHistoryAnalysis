@@ -26,14 +26,16 @@ program
   .option('-e, --end-date <date>', '结束日期 (YYYY-MM-DD)')
   .option('-o, --output <dir>', '输出目录', './output')
   .option('-t, --temp <dir>', '临时目录', './temp')
-  .option('--decrypt-tool <path>', '解密工具路径', './bin/decrypt-tool')
+  .option('--decrypt-tool <path>', '解密工具路径 (generic 模式)', './bin/decrypt-tool')
+  .option('--tool-type <type>', '解密工具类型: pywxdump | generic', 'pywxdump')
+  .option('--python-path <path>', 'Python 可执行文件路径 (PyWxDump 模式)', 'python')
+  .option('--pywxdump-module <module>', 'PyWxDump 模块名', 'pywxdump')
   .option('--llm-endpoint <url>', 'LLM API端点')
   .option('--llm-key <key>', 'LLM API密钥')
   .option('--llm-model <model>', '主模型名称', 'gpt-4o')
   .option('--llm-fallback <model>', '备用模型名称', 'gpt-4o-mini')
   .option('--concurrency <n>', '并发数', '3')
   .option('--batch-size <n>', '批次大小', '10')
-  .option('--no-html', '不导出HTML报告')
   .option('--no-csv', '不导出CSV')
   .option('--no-jsonl', '不导出JSONL')
   .option('--log-level <level>', '日志级别 (debug|info|warn|error)', 'info')
@@ -61,8 +63,13 @@ program
           allowedVersions: config.extractor?.allowedVersions || ['3.9.x', '3.8.x'],
         },
         decryptor: {
-          decryptToolPath: options.decryptTool || config.decryptor?.decryptToolPath || './bin/decrypt-tool',
+          toolType: options.toolType || config.decryptor?.toolType || 'pywxdump',
+          decryptToolPath: options.decryptTool || config.decryptor?.decryptToolPath,
+          pythonPath: options.pythonPath || config.decryptor?.pythonPath || 'python',
+          pywxdumpModule: options.pywxdumpModule || config.decryptor?.pywxdumpModule || 'pywxdump',
+          pywxdumpBiasArgs: config.decryptor?.pywxdumpBiasArgs || [],
           strategy: config.decryptor?.strategy || 'memory',
+          manualKey: config.decryptor?.manualKey,
           outputDir: path.join(options.temp || config.tempDir || './temp', 'decrypted'),
           concurrency: config.decryptor?.concurrency || 3,
         },
@@ -104,11 +111,6 @@ program
           outputDir: options.output || config.exporter?.outputDir || './output',
           exportJsonl: options.jsonl !== false && (config.exporter?.exportJsonl ?? true),
           exportCsv: options.csv !== false && (config.exporter?.exportCsv ?? true),
-          exportHtml: options.html !== false && (config.exporter?.exportHtml ?? true),
-          htmlTitle: config.exporter?.htmlTitle || '微信聊天记录分析报告',
-          writeToDatabase: config.exporter?.writeToDatabase || false,
-          database: config.exporter?.database,
-          vector: config.exporter?.vector,
         },
         logLevel: (options.logLevel as LogLevel) || config.logLevel || 'info',
         tempDir: options.temp || config.tempDir || './temp',

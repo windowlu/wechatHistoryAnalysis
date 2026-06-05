@@ -44,7 +44,7 @@
 | **解密层** | 从微信进程/本地缓存获取SQLCipher密钥，批量解密消息数据库 | JSONL（原始消息流） |
 | **标准化层** | 清洗、去重、类型识别、群聊成员解析、时间戳对齐 | 标准化会话对象数组 |
 | **分析层** | 按会话维度调用LLM进行智能分析 | 结构化分析结果（JSON） |
-| **持久层** | 导出JSONL/CSV/HTML报告，可选回写PostgreSQL/pgvector | 多格式本地文件 |
+| **持久层** | 导出JSONL/CSV报告 | 本地文件 |
 
 ---
 
@@ -58,9 +58,11 @@
 
 ### 3.2 解密层
 
-- **密钥获取策略**：优先从微信进程内存提取实时密钥（无需密码），失败则回退至本地缓存或手动输入
-- **子进程隔离**：解密以独立子进程运行，与主分析进程隔离，只读模式不修改原始数据库
-- **增量识别**：输出附带每条消息的 `MsgId` 与时间戳，供下游去重
+- **PyWxDump 集成**：调用 `pywxdump bias --auto` 自动从微信进程内存提取 SQLCipher 密钥，无需密码
+- **自动解密 + SQLite 读取**：通过 `pywxdump decrypt` 解密数据库为普通 SQLite，再用 `better-sqlite3` 逐行读取 `MSG` 表
+- **子进程隔离**：PyWxDump 以独立 Python 子进程运行，与主分析进程隔离，只读模式不修改原始数据库
+- **增量识别**：输出附带每条消息的 `msgId` 与时间戳，供下游去重
+- **多工具适配**：保留 `generic` 模式，可接入其他自定义解密工具
 
 ### 3.3 标准化层
 
@@ -81,8 +83,6 @@
 
 - **JSONL**：面向机器消费，每行完整分析对象，保留全部嵌套结构
 - **CSV**：字段扁平化，Excel/WPS直接打开，快速筛选排序
-- **HTML报告**：单页应用形态，内置可视化图表与关键洞察高亮，离线可打开
-- **数据库（可选）**：PostgreSQL + pgvector，支持JSONB灵活查询与Embedding相似度检索
 
 ---
 
@@ -92,7 +92,11 @@
 
 - **Node.js** >= 18.0.0
 - **操作系统**：Windows（微信PC端所在系统）
+- **Python** >= 3.8（PyWxDump 依赖）
+- **PyWxDump**：`pip install pywxdump`
 - **LLM API密钥**：OpenAI / Anthropic / 兼容OpenAI格式的自定义端点
+
+> **关于 better-sqlite3**：使用 PyWxDump 模式时需要编译安装。Windows 用户若遇到编译失败，请先安装 [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) 的「使用 C++ 的桌面开发」工作负载，或改用 `npm install --build-from-source better-sqlite3`。
 
 ### 4.2 安装
 
@@ -101,10 +105,13 @@
 git clone <repo-url>
 cd wechat-history-analysis
 
-# 安装依赖
+# 安装 Node.js 依赖
 npm install
 
-# 编译TypeScript
+# 安装 PyWxDump（需 Python >= 3.8）
+pip install pywxdump
+
+# 编译 TypeScript
 npm run build
 ```
 
@@ -124,7 +131,9 @@ cp config.example.json config.json
     "customDataPath": "C:\\Users\\YOUR_NAME\\Documents\\WeChat Files"
   },
   "decryptor": {
-    "decryptToolPath": "./bin/decrypt-tool.exe",
+    "toolType": "pywxdump",
+    "pythonPath": "python",
+    "pywxdumpModule": "pywxdump",
     "strategy": "memory"
   },
   "analyzer": {
@@ -137,7 +146,13 @@ cp config.example.json config.json
 }
 ```
 
-> **注意**: `decryptToolPath` 指向外部解密工具可执行文件。项目不包含解密工具本身，需自行准备（如基于 `wechatDataBackup` 或 `PyWxDump` 编译/提取）。
+> **PyWxDump 配置说明**
+> - `toolType`: 固定为 `"pywxdump"`（也可设为 `"generic"` 使用自定义解密工具）
+> - `pythonPath`: Python 可执行文件路径，默认 `"python"`
+> - `pywxdumpModule`: PyWxDump 模块名，默认 `"pywxdump"`
+> - `pywxdumpBiasArgs`: 传递给 `pywxdump bias --auto` 的额外参数，如 `["--deep"]` 进行深度扫描
+>
+> **管理员权限**: 在 Windows 上使用 PyWxDump 的 `bias --auto` 获取密钥时，必须以**管理员权限**运行命令行（微信进程内存读取需要）。
 
 ### 4.4 运行分析
 
@@ -166,7 +181,6 @@ npm start -- --help
 output/
 ├── analysis_results.jsonl   # 机器可读完整数据
 ├── analysis_results.csv     # Excel可打开的扁平化表格
-├── report.html              # 可视化报告（双击浏览器打开）
 └── analysis_20260604.log    # 执行日志
 ```
 
@@ -183,7 +197,7 @@ wechat-history-analysis/
 │   ├── analyzer/            # 分析层 — LLM调用、提示词、输出校验
 │   │   ├── prompts.ts       # 分析/降级提示词模板
 │   │   └── validator.ts     # 输出数值范围与一致性校验
-│   ├── persister/           # 持久层 — JSONL/CSV/HTML导出、数据库写入
+│   ├── persister/           # 持久层 — JSONL/CSV导出
 │   ├── types/               # 全系统TypeScript类型定义
 │   ├── utils/               # 工具函数
 │   │   ├── logger.ts        # 分级日志
@@ -191,8 +205,6 @@ wechat-history-analysis/
 │   │   └── path-resolver.ts # 微信路径解析与版本兼容
 │   ├── pipeline.ts          # 流水线编排器 — 五层协调与错误隔离
 │   └── cli.ts               # CLI入口
-├── templates/
-│   └── report.ejs           # HTML报告EJS模板
 ├── tests/
 │   └── unit/                # 单元测试
 ├── bin/                     # 外部解密工具（需自行放置）
@@ -220,9 +232,13 @@ wechat-history-analysis/
 
 | 字段 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `decryptToolPath` | string | `./bin/decrypt-tool` | 解密工具可执行文件路径 |
-| `strategy` | string | `memory` | 密钥策略：`memory`/`cache`/`manual` |
-| `manualKey` | string | — | 手动密钥（strategy=manual时使用） |
+| `toolType` | string | `pywxdump` | 解密工具类型：`pywxdump` 或 `generic` |
+| `pythonPath` | string | `python` | Python 可执行文件路径（`pywxdump` 模式） |
+| `pywxdumpModule` | string | `pywxdump` | PyWxDump 模块名（`pywxdump` 模式） |
+| `pywxdumpBiasArgs` | string[] | `[]` | 传递给 `bias --auto` 的额外参数，如 `["--deep"]` |
+| `decryptToolPath` | string | — | 自定义解密工具路径（`generic` 模式必填） |
+| `strategy` | string | `memory` | 密钥策略（`generic` 模式）：`memory`/`cache`/`manual` |
+| `manualKey` | string | — | 手动密钥（`generic` + strategy=manual 时使用） |
 | `concurrency` | number | 3 | 并行解密任务数 |
 
 ### 6.3 标准化层配置
@@ -253,8 +269,6 @@ wechat-history-analysis/
 | `outputDir` | string | `./output` | 输出目录 |
 | `exportJsonl` | boolean | true | 导出JSONL |
 | `exportCsv` | boolean | true | 导出CSV |
-| `exportHtml` | boolean | true | 导出HTML报告 |
-| `writeToDatabase` | boolean | false | 写入PostgreSQL |
 
 ---
 
@@ -309,7 +323,7 @@ const WECHAT_TYPE_MAP: Record<number, MessageType> = {
 
 ### 8.1 微信版本兼容性
 
-微信PC端更新频繁，数据库加密参数、密钥派生逻辑、文件路径均可能变化。**解密层已严格隔离为独立子进程与独立代码仓库**，版本适配时仅需替换可执行文件，不影响主分析流程。建议建立微信版本白名单机制。
+微信PC端更新频繁，数据库加密参数、密钥派生逻辑、文件路径均可能变化。**解密层已严格隔离**，通过 PyWxDump 统一处理密钥提取与数据库解密。PyWxDump 社区维护活跃，通常能在新版微信发布后不久适配偏移量。建议关注 PyWxDump 更新，并建立微信版本白名单机制。
 
 ### 8.2 数据隐私与合规
 
@@ -336,7 +350,7 @@ LLM分析长对话时可能出现幻觉、格式偏离或评分标准漂移。�
 
 | 阶段 | 目标 | 产出 |
 |------|------|------|
-| **Phase 1** | 验证解密可行性 | 使用开源工具手动导出，确认数据库可解密、字段可读取 |
+| **Phase 1** | 验证解密可行性 | 安装 PyWxDump，以管理员权限运行 `pywxdump bias --auto`，确认可获取密钥并解密 MSG 数据库 |
 | **Phase 2** | 搭建标准化管道 | Node.js清洗脚本，验证群聊解析、时间对齐、类型映射 |
 | **Phase 3** | 接入LLM分析 | 代表性会话提示词调优，人工校验评分合理性与JSON稳定性 |
 | **Phase 4** | 一键封装 | CLI命令整合，自动执行、多格式导出 |
@@ -348,9 +362,9 @@ LLM分析长对话时可能出现幻觉、格式偏离或评分标准漂移。�
 | 层级 | 技术 |
 |------|------|
 | 主进程 | Node.js + TypeScript |
-| 解密工具 | Go / Python（外部可执行文件） |
-| 报告生成 | EJS + Tailwind CSS（CDN内联） |
-| 数据存储 | PostgreSQL + pgvector（可选） |
+| 解密工具 | PyWxDump（Python，内存提取 SQLCipher 密钥 + 解密） |
+| 数据读取 | better-sqlite3（读取 PyWxDump 解密后的 SQLite） |
+| 数据存储 | JSONL + CSV（本地文件） |
 | LLM调用 | OpenAI兼容API |
 | 测试 | Jest + ts-jest |
 
