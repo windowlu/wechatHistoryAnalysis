@@ -4,6 +4,7 @@
  * 提供错误隔离、局部回滚与执行统计
  */
 
+import { EventEmitter } from 'events';
 import * as path from 'path';
 import * as fs from 'fs-extra';
 import {
@@ -21,10 +22,11 @@ import { Analyzer } from './analyzer';
 import { Persister } from './persister';
 import { logger } from './utils/logger';
 
-export class AnalysisPipeline {
+export class AnalysisPipeline extends EventEmitter {
   private config: PipelineConfig;
 
   constructor(config: PipelineConfig) {
+    super();
     this.config = config;
   }
 
@@ -60,6 +62,7 @@ export class AnalysisPipeline {
       // 阶段1: 提取层
       // ═══════════════════════════════════════════════════════
       logger.info('[阶段1/5] 提取层: 扫描微信数据目录');
+      this.emit('stage', { name: 'extraction', message: '扫描微信数据目录', percent: 5 });
       const extractor = new Extractor(this.config.extractor);
       extraction = await extractor.extract();
       result.stages.extraction = extraction;
@@ -69,6 +72,7 @@ export class AnalysisPipeline {
       // 阶段2: 解密层
       // ═══════════════════════════════════════════════════════
       logger.info('[阶段2/5] 解密层: 批量解密数据库');
+      this.emit('stage', { name: 'decryption', message: '批量解密数据库', percent: 20 });
       const msgDbs = extraction.selectedDatabases
         .filter((db) => db.type === 'MSG')
         .map((db) => db.path);
@@ -83,6 +87,7 @@ export class AnalysisPipeline {
       // 阶段3: 标准化层
       // ═══════════════════════════════════════════════════════
       logger.info('[阶段3/5] 标准化层: 清洗与结构化');
+      this.emit('stage', { name: 'normalization', message: '清洗与结构化', percent: 40 });
       if (microMsgDb) {
         this.config.normalizer.contactDbPath = microMsgDb;
       }
@@ -98,6 +103,7 @@ export class AnalysisPipeline {
       // 阶段4: 分析层
       // ═══════════════════════════════════════════════════════
       logger.info('[阶段4/5] 分析层: LLM智能分析');
+      this.emit('stage', { name: 'analysis', message: 'LLM智能分析', percent: 55 });
       const analyzer = new Analyzer(this.config.analyzer);
       analysis = await analyzer.analyze(sessions);
       result.stages.analysis = analysis;
@@ -107,6 +113,7 @@ export class AnalysisPipeline {
       // 阶段5: 持久层
       // ═══════════════════════════════════════════════════════
       logger.info('[阶段5/5] 持久层: 导出分析结果');
+      this.emit('stage', { name: 'persister', message: '导出分析结果', percent: 90 });
       const persister = new Persister(this.config.exporter);
       const exportResult = await persister.persist(analysis.success, sessions);
       result.stages.export = exportResult;
@@ -114,10 +121,12 @@ export class AnalysisPipeline {
 
       // 整体成功
       result.success = true;
+      this.emit('complete', result);
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
       logger.error(`流水线执行失败: ${errorMsg}`);
       result.error = errorMsg;
+      this.emit('error', errorMsg);
 
       // 局部回滚：清理临时文件
       await this.cleanup();

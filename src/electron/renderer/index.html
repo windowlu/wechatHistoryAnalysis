@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>微信聊天记录分析工具</title>
+  <link rel="stylesheet" href="./style.css">
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+</head>
+<body>
+  <!-- 配置页 -->
+  <div id="config-page" class="page active">
+    <header class="app-header">
+      <h1>微信聊天记录分析工具</h1>
+      <p class="subtitle">销售对话智能分析系统</p>
+    </header>
+
+    <main class="config-form">
+      <section class="form-section">
+        <h2>基本配置</h2>
+
+        <div class="form-group">
+          <label for="data-path">微信数据目录</label>
+          <div class="input-with-button">
+            <input type="text" id="data-path" placeholder="选择微信数据目录（包含 wxid_xxx 文件夹）">
+            <button id="btn-browse-data" class="btn-secondary">浏览</button>
+          </div>
+          <span class="hint">Windows 默认在 Documents\WeChat Files 下</span>
+        </div>
+
+        <div class="form-group">
+          <label for="llm-provider">LLM 服务商</label>
+          <select id="llm-provider">
+            <option value="openai">OpenAI</option>
+            <option value="anthropic">Anthropic</option>
+            <option value="local">本地模型</option>
+            <option value="custom">自定义</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="api-endpoint">API 端点</label>
+          <input type="text" id="api-endpoint" placeholder="https://api.openai.com/v1/chat/completions">
+        </div>
+
+        <div class="form-group">
+          <label for="api-key">API Key</label>
+          <input type="password" id="api-key" placeholder="sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx">
+        </div>
+
+        <div class="form-row">
+          <div class="form-group half">
+            <label for="primary-model">主模型</label>
+            <input type="text" id="primary-model" placeholder="gpt-4o" value="gpt-4o">
+          </div>
+          <div class="form-group half">
+            <label for="fallback-model">备用模型</label>
+            <input type="text" id="fallback-model" placeholder="gpt-4o-mini" value="gpt-4o-mini">
+          </div>
+        </div>
+      </section>
+
+      <section class="form-section collapsible">
+        <h2 class="collapsible-header">
+          <span>高级配置</span>
+          <span class="toggle-icon">▼</span>
+        </h2>
+        <div class="collapsible-body collapsed">
+          <div class="form-row">
+            <div class="form-group half">
+              <label for="decrypt-tool-type">解密工具类型</label>
+              <select id="decrypt-tool-type">
+                <option value="pywxdump">PyWxDump (推荐)</option>
+                <option value="generic">通用工具</option>
+              </select>
+            </div>
+            <div class="form-group half">
+              <label for="python-path">Python 路径</label>
+              <input type="text" id="python-path" placeholder="python" value="python">
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group half">
+              <label for="concurrency">并发数</label>
+              <input type="number" id="concurrency" value="3" min="1" max="10">
+            </div>
+            <div class="form-group half">
+              <label for="batch-size">批次大小</label>
+              <input type="number" id="batch-size" value="10" min="1" max="50">
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="output-dir">输出目录</label>
+            <input type="text" id="output-dir" placeholder="./output" value="./output">
+          </div>
+
+          <div class="form-group">
+            <label for="log-level">日志级别</label>
+            <select id="log-level">
+              <option value="info">info</option>
+              <option value="debug">debug</option>
+              <option value="warn">warn</option>
+              <option value="error">error</option>
+            </select>
+          </div>
+        </div>
+      </section>
+
+      <div class="form-actions">
+        <button id="btn-start" class="btn-primary btn-large">开始分析</button>
+      </div>
+    </main>
+  </div>
+
+  <!-- 运行中页 -->
+  <div id="running-page" class="page">
+    <header class="app-header">
+      <h1>分析中...</h1>
+    </header>
+
+    <main class="running-panel">
+      <div class="progress-area">
+        <div class="progress-bar-container">
+          <div id="progress-bar" class="progress-bar" style="width: 0%"></div>
+        </div>
+        <div class="progress-info">
+          <span id="progress-percent">0%</span>
+          <span id="progress-message">准备开始</span>
+        </div>
+      </div>
+
+      <div class="log-terminal">
+        <div class="log-header">实时日志</div>
+        <div id="log-content" class="log-content"></div>
+      </div>
+
+      <div class="form-actions">
+        <button id="btn-cancel" class="btn-secondary">取消</button>
+      </div>
+    </main>
+  </div>
+
+  <!-- 结果页 -->
+  <div id="result-page" class="page">
+    <header class="app-header">
+      <h1>分析结果</h1>
+    </header>
+
+    <main class="result-panel">
+      <!-- 概览卡片 -->
+      <div class="overview-cards" id="overview-cards">
+        <div class="card">
+          <div class="card-value" id="stat-duration">-</div>
+          <div class="card-label">总耗时</div>
+        </div>
+        <div class="card">
+          <div class="card-value" id="stat-sessions">-</div>
+          <div class="card-label">会话数</div>
+        </div>
+        <div class="card success">
+          <div class="card-value" id="stat-success">-</div>
+          <div class="card-label">成功</div>
+        </div>
+        <div class="card error">
+          <div class="card-value" id="stat-failed">-</div>
+          <div class="card-label">失败</div>
+        </div>
+      </div>
+
+      <!-- 图表区域 -->
+      <div class="charts-area">
+        <div class="chart-box">
+          <h3>维度平均分</h3>
+          <div id="chart-dimensions" class="chart-container"></div>
+        </div>
+        <div class="chart-box">
+          <h3>得分分布</h3>
+          <div id="chart-distribution" class="chart-container"></div>
+        </div>
+      </div>
+
+      <!-- 会话列表 -->
+      <div class="sessions-area">
+        <h3>会话详情</h3>
+        <div class="table-container">
+          <table id="sessions-table">
+            <thead>
+              <tr>
+                <th>会话</th>
+                <th>消息数</th>
+                <th>意愿</th>
+                <th>需求</th>
+                <th>意向</th>
+                <th>情感</th>
+                <th>综合</th>
+                <th>状态</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="sessions-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- 输出文件 -->
+      <div class="output-area" id="output-area">
+        <h3>输出文件</h3>
+        <div id="output-files" class="output-files"></div>
+      </div>
+
+      <div class="form-actions">
+        <button id="btn-back" class="btn-primary">返回配置页</button>
+      </div>
+    </main>
+  </div>
+
+  <!-- 错误弹窗 -->
+  <div id="error-modal" class="modal">
+    <div class="modal-content">
+      <h3>出错了</h3>
+      <p id="error-message"></p>
+      <button id="btn-error-ok" class="btn-primary">确定</button>
+    </div>
+  </div>
+
+  <script src="./app.js"></script>
+</body>
+</html>

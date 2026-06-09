@@ -15,13 +15,28 @@ const LEVEL_PRIORITY: Record<LogLevel, number> = {
   error: 3,
 };
 
+export type LogTransport = (
+  level: LogLevel,
+  message: string,
+  meta?: Record<string, unknown>,
+) => void;
+
 class Logger {
   private level: LogLevel = 'info';
   private logFile?: string;
   private stream?: fs.WriteStream;
+  private transports: LogTransport[] = [];
 
   setLevel(level: LogLevel): void {
     this.level = level;
+  }
+
+  addTransport(transport: LogTransport): void {
+    this.transports.push(transport);
+  }
+
+  clearTransports(): void {
+    this.transports = [];
   }
 
   async initLogFile(outputDir: string): Promise<void> {
@@ -56,6 +71,15 @@ class Logger {
     // 文件输出
     if (this.stream) {
       this.stream.write(line);
+    }
+
+    // 自定义传输（如 Electron IPC）
+    for (const transport of this.transports) {
+      try {
+        transport(level, message, meta);
+      } catch {
+        // 忽略 transport 抛出的错误，避免日志系统崩溃
+      }
     }
   }
 

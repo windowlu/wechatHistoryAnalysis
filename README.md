@@ -19,7 +19,7 @@
 
 | 原则 | 说明 |
 |------|------|
-| **命令式触发** | 整个流程由用户主动发起，执行完毕后即退出，不驻留内存，不监听文件系统变化 |
+| **GUI 触发** | 整个流程由用户在桌面应用中点击发起，执行完毕后展示结果，不驻留后台 |
 | **静态离线优先** | 所有数据处理均在本地完成，原始聊天记录不出境、不上云；LLM分析按会话批次传输，最小化数据暴露面 |
 | **管道化架构** | 提取、解密、分析、导出四个阶段严格解耦，每阶段输出标准中间格式，便于单点调试、替换与扩展 |
 
@@ -115,63 +115,52 @@ pip install pywxdump
 npm run build
 ```
 
-### 4.3 配置
+### 4.3 配置（图形界面）
 
-复制示例配置文件并填入实际参数：
+启动应用后，在配置页填写以下信息：
 
-```bash
-cp config.example.json config.json
-```
+| 配置项 | 说明 | 示例 |
+|--------|------|------|
+| 微信数据目录 | 包含 `wxid_xxx` 文件夹的目录 | `C:\Users\YOUR_NAME\Documents\WeChat Files` |
+| LLM 服务商 | API 提供商 | OpenAI / Anthropic / 本地模型 / 自定义 |
+| API 端点 | 兼容 OpenAI 格式的接口地址 | `https://api.openai.com/v1/chat/completions` |
+| API Key | 你的 LLM API 密钥 | `sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx` |
+| 主模型 | 主要分析模型 | `gpt-4o` |
+| 备用模型 | 主模型失败时降级使用 | `gpt-4o-mini` |
 
-编辑 `config.json`，重点关注以下字段：
+点击「高级配置」可展开更多选项：解密工具类型、Python 路径、并发数、输出目录等。
 
-```json
-{
-  "extractor": {
-    "customDataPath": "C:\\Users\\YOUR_NAME\\Documents\\WeChat Files"
-  },
-  "decryptor": {
-    "toolType": "pywxdump",
-    "pythonPath": "python",
-    "pywxdumpModule": "pywxdump",
-    "strategy": "memory"
-  },
-  "analyzer": {
-    "llm": {
-      "apiKey": "sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
-      "primaryModel": "gpt-4o",
-      "fallbackModel": "gpt-4o-mini"
-    }
-  }
-}
-```
+配置会自动保存到本地，下次打开时自动恢复。
 
 > **PyWxDump 配置说明**
-> - `toolType`: 固定为 `"pywxdump"`（也可设为 `"generic"` 使用自定义解密工具）
-> - `pythonPath`: Python 可执行文件路径，默认 `"python"`
-> - `pywxdumpModule`: PyWxDump 模块名，默认 `"pywxdump"`
-> - `pywxdumpBiasArgs`: 传递给 `pywxdump bias --auto` 的额外参数，如 `["--deep"]` 进行深度扫描
+> - 解密工具类型: 默认 `"pywxdump"`（也可设为 `"generic"` 使用自定义解密工具）
+> - Python 路径: Python 可执行文件路径，默认 `"python"`
 >
-> **管理员权限**: 在 Windows 上使用 PyWxDump 的 `bias --auto` 获取密钥时，必须以**管理员权限**运行命令行（微信进程内存读取需要）。
+> **管理员权限**: 在 Windows 上使用 PyWxDump 的 `bias --auto` 获取密钥时，必须以**管理员权限**运行应用（微信进程内存读取需要）。右键点击 `.exe` →「以管理员身份运行」。
 
-### 4.4 运行分析
+### 4.4 运行分析（开发模式）
 
 ```bash
-# 使用配置文件
-npm start -- analyze --config config.json
-
-# 命令行参数直接运行
-npm start -- analyze \
-  --data-path "C:\\Users\\YOUR_NAME\\Documents\\WeChat Files" \
-  --llm-key "sk-xxxxxxxx" \
-  --llm-model "gpt-4o" \
-  --output "./output" \
-  --start-date "2025-01-01" \
-  --end-date "2025-12-31"
-
-# 查看帮助
-npm start -- --help
+# 编译并启动 Electron 桌面应用
+npm run dev
 ```
+
+启动后会打开图形界面：
+
+1. **配置页**：填写微信数据目录、API Key、模型等参数
+2. **点击「开始分析」**：系统显示实时进度条和日志
+3. **结果页**：分析完成后展示会话表格、维度评分图表和输出文件
+
+### 4.5 Windows 打包
+
+```bash
+# 生成 Windows 安装包 + 便携包
+npm run dist:win
+```
+
+打包产物位于 `release/` 目录：
+- `微信聊天记录分析工具-Setup-1.0.0.exe` — NSIS 安装包
+- `微信聊天记录分析工具-Portable-1.0.0.exe` — 免安装便携版
 
 ### 4.5 输出示例
 
@@ -204,7 +193,13 @@ wechat-history-analysis/
 │   │   ├── stream-helper.ts # 大文件流式处理、LRU缓存
 │   │   └── path-resolver.ts # 微信路径解析与版本兼容
 │   ├── pipeline.ts          # 流水线编排器 — 五层协调与错误隔离
-│   └── cli.ts               # CLI入口
+│   └── electron/            # Electron 桌面应用
+│       ├── main.ts          # 主进程 — 窗口管理、IPC、调用 Pipeline
+│       ├── preload.ts       # 安全桥接 — 暴露 electronAPI
+│       └── renderer/        # 渲染进程前端
+│           ├── index.html   # 配置页 / 进度页 / 结果页
+│           ├── style.css    # 界面样式
+│           └── app.js       # 前端交互逻辑
 ├── tests/
 │   └── unit/                # 单元测试
 ├── bin/                     # 外部解密工具（需自行放置）
@@ -277,8 +272,11 @@ wechat-history-analysis/
 ### 7.1 本地开发
 
 ```bash
-# 开发模式运行
-npm run dev -- analyze --config config.json
+# 编译并启动 Electron（开发模式）
+npm run dev
+
+# 仅编译 TypeScript
+npm run build
 
 # 运行测试
 npm test
@@ -361,12 +359,15 @@ LLM分析长对话时可能出现幻觉、格式偏离或评分标准漂移。�
 
 | 层级 | 技术 |
 |------|------|
+| 桌面框架 | Electron |
+| 前端 | HTML / CSS / JavaScript + ECharts |
 | 主进程 | Node.js + TypeScript |
 | 解密工具 | PyWxDump（Python，内存提取 SQLCipher 密钥 + 解密） |
 | 数据读取 | better-sqlite3（读取 PyWxDump 解密后的 SQLite） |
 | 数据存储 | JSONL + CSV（本地文件） |
 | LLM调用 | OpenAI兼容API |
 | 测试 | Jest + ts-jest |
+| 打包 | electron-builder |
 
 ---
 

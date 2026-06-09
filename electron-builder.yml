@@ -1,0 +1,47 @@
+appId: com.yourcompany.wechat-analysis
+productName: 微信聊天记录分析工具
+directories:
+  output: release
+copyright: Copyright © 2026
+files:
+  - dist/**/*
+  - '!dist/**/*.d.ts'
+  - '!dist/**/*.d.ts.map'
+  - '!dist/**/*.js.map'
+  - package.json
+asar: true
+asarUnpack:
+  - '**/*.node'
+  - node_modules/better-sqlite3/**/*
+  - node_modules/bindings/**/*
+  - node_modules/file-uri-to-path/**/*
+npmRebuild: true
+win:
+  executableName: WechatAnalysis
+  target:
+    - target: portable
+      arch:
+        - x64
+    - target: nsis
+      arch:
+        - x64
+  icon: assets/icon.ico
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: 微信聊天记录分析工具
+  artifactName: '${productName}-Setup-${version}.${ext}'
+portable:
+  artifactName: '${productName}-Portable-${version}.${ext}'
+mac:
+  target:
+    - target: dmg
+      arch:
+        - x64
+        - arm64
+  icon: assets/icon.icns
+  category: public.app-category.productivity
+dmg:
+  artifactName: '${productName}-${version}-${arch}.${ext}'
