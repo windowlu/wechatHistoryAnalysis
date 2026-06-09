@@ -1,6 +1,6 @@
 /**
  * 持久层 (Persister)
- * 负责将分析结果写入JSONL、CSV报告
+ * 负责将客户识别与分类结果写入JSONL、CSV报告
  */
 
 import * as path from 'path';
@@ -35,7 +35,7 @@ export class Persister {
 
     // 1. 导出JSONL
     if (this.config.exportJsonl) {
-      const jsonlPath = path.join(this.config.outputDir, 'analysis_results.jsonl');
+      const jsonlPath = path.join(this.config.outputDir, 'customer_analysis.jsonl');
       await writeJsonlStream(jsonlPath, analysisResults);
       filePaths.push(jsonlPath);
       logger.info(`JSONL导出完成: ${jsonlPath}`);
@@ -43,7 +43,7 @@ export class Persister {
 
     // 2. 导出CSV
     if (this.config.exportCsv) {
-      const csvPath = path.join(this.config.outputDir, 'analysis_results.csv');
+      const csvPath = path.join(this.config.outputDir, 'customer_list.csv');
       await this.exportCsv(csvPath, analysisResults);
       filePaths.push(csvPath);
       logger.info(`CSV导出完成: ${csvPath}`);
@@ -54,32 +54,97 @@ export class Persister {
   }
 
   /**
-   * 导出CSV（扁平化字段）
+   * 导出CSV（客户列表视图，扁平化字段）
    */
   private async exportCsv(filePath: string, results: SessionAnalysis[]): Promise<void> {
-    const records = results.map((r) => ({
-      talkerId: r.talkerId,
-      talkerName: r.talkerName,
-      summary: r.summary,
-      intentScore: r.intentRating.score,
-      intentLabel: r.intentRating.label,
-      intentReasoning: r.intentRating.reasoning,
-      overallScore: r.salesQuality.overallScore,
-      responsiveness: r.salesQuality.responsiveness,
-      discoveryDepth: r.salesQuality.discoveryDepth,
-      valueClarity: r.salesQuality.valueClarity,
-      objectionHandling: r.salesQuality.objectionHandling,
-      ctaEffectiveness: r.salesQuality.ctaEffectiveness,
-      suggestions: r.salesQuality.suggestions.join('; '),
-      keyNeeds: r.customerProfile.keyNeeds.join('; '),
-      decisionStage: r.customerProfile.decisionStage || '',
-      budgetSensitivity: r.customerProfile.budgetSensitivity || '',
-      followUps: r.followUps.map((f) => `[${f.priority}]${f.description}`).join('; '),
-      riskFlags: r.riskFlags.map((f) => `[${f.severity}]${f.type}:${f.description}`).join('; '),
-      keyInsights: r.keyInsights.join('; '),
-      analyzedAt: r.analyzedAt,
-      model: r.model,
-    }));
+    const records = results.map((r) => {
+      const cls = r.classification;
+      const isCustomer = cls.isCustomer;
+
+      // 根据客户类型提取信息
+      let companyName = '';
+      let contactName = '';
+      let contactRole = '';
+      let demandType = '';
+      let demandDetail = '';
+      let region = '';
+      let urgency = '';
+      let budgetRange = '';
+      let followUpStatus = '';
+      let projectTypes = '';
+
+      let name = '';
+      let examType = '';
+      let examYear = '';
+      let major = '';
+      let studyStage = '';
+      let purchaseHistory = '';
+
+      if (isCustomer && r.customerInfo) {
+        if (cls.customerType === 'b2b') {
+          const info = r.customerInfo as Record<string, unknown>;
+          companyName = (info.companyName as string) || '';
+          contactName = (info.contactName as string) || '';
+          contactRole = (info.contactRole as string) || '';
+          demandType = (info.demandType as string) || '';
+          demandDetail = (info.demandDetail as string) || '';
+          region = (info.region as string) || '';
+          urgency = (info.urgency as string) || '';
+          budgetRange = (info.budgetRange as string) || '';
+          followUpStatus = (info.followUpStatus as string) || '';
+          projectTypes = Array.isArray(info.projectTypes)
+            ? info.projectTypes.join('; ')
+            : '';
+        } else {
+          const info = r.customerInfo as Record<string, unknown>;
+          name = (info.name as string) || '';
+          examType = (info.examType as string) || '';
+          examYear = (info.examYear as string) || '';
+          demandType = (info.demandType as string) || '';
+          major = (info.major as string) || '';
+          region = (info.region as string) || '';
+          studyStage = (info.studyStage as string) || '';
+          followUpStatus = (info.followUpStatus as string) || '';
+          purchaseHistory = Array.isArray(info.purchaseHistory)
+            ? info.purchaseHistory.join('; ')
+            : '';
+        }
+      }
+
+      return {
+        talkerId: r.talkerId,
+        talkerName: r.talkerName,
+        isCustomer: isCustomer ? '是' : '否',
+        customerType: cls.customerType || '',
+        subType: cls.subType || '',
+        confidence: cls.confidence,
+        reasoning: cls.reasoning,
+        // B端字段
+        companyName,
+        contactName,
+        contactRole,
+        // C端字段
+        name,
+        examType,
+        examYear,
+        major,
+        studyStage,
+        purchaseHistory,
+        // 通用业务字段
+        demandType,
+        demandDetail,
+        region,
+        urgency,
+        budgetRange,
+        followUpStatus,
+        projectTypes,
+        keyInsights: r.keyInsights.join('; '),
+        lastActiveAt: r.lastActiveAt,
+        messageCount: r.messageCount,
+        analyzedAt: r.analyzedAt,
+        model: r.model,
+      };
+    });
 
     const csvWriter = createObjectCsvWriter({
       path: filePath,

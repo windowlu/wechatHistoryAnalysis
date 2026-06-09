@@ -101,6 +101,10 @@ describe('AnalysisPipeline', () => {
       compressionThreshold: 6000,
       batchSize: 10,
       enforceJsonMode: true,
+      classification: {
+        filterNonCustomers: true,
+        minConfidence: 0.6,
+      },
       validation: {
         enableRangeCheck: true,
         enableConsistencyCheck: true,

@@ -36,7 +36,7 @@ export class AnalysisPipeline extends EventEmitter {
   async run(): Promise<PipelineResult> {
     const startTime = new Date();
     logger.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    logger.info('微信聊天记录分析流水线 启动');
+    logger.info('微信聊天记录客户识别系统 启动');
     logger.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
     const result: PipelineResult = {
@@ -100,10 +100,10 @@ export class AnalysisPipeline extends EventEmitter {
       logger.info('标准化层完成 ✓');
 
       // ═══════════════════════════════════════════════════════
-      // 阶段4: 分析层
+      // 阶段4: 分析层（客户识别与分类）
       // ═══════════════════════════════════════════════════════
-      logger.info('[阶段4/5] 分析层: LLM智能分析');
-      this.emit('stage', { name: 'analysis', message: 'LLM智能分析', percent: 55 });
+      logger.info('[阶段4/5] 分析层: LLM客户识别与分类');
+      this.emit('stage', { name: 'analysis', message: 'LLM客户识别与分类', percent: 55 });
       const analyzer = new Analyzer(this.config.analyzer);
       analysis = await analyzer.analyze(sessions);
       result.stages.analysis = analysis;
@@ -221,12 +221,14 @@ export class AnalysisPipeline extends EventEmitter {
     }
 
     if (result.stages.normalization) {
-      logger.info(`会话数: ${result.stages.normalization.sessionCount}`);
+      logger.info(`总会话数: ${result.stages.normalization.sessionCount}`);
       logger.info(`消息总数: ${result.stages.normalization.messageCount}`);
     }
 
     if (analysis) {
       logger.info(`分析成功: ${analysis.stats.successCount}/${analysis.stats.totalSessions}`);
+      logger.info(`客户识别: ${analysis.stats.customerCount} (B端 ${analysis.stats.b2bCount}, C端 ${analysis.stats.b2cCount})`);
+      logger.info(`非客户: ${analysis.stats.nonCustomerCount}`);
       logger.info(`分析失败: ${analysis.stats.failCount}`);
       if (analysis.failed.length > 0) {
         logger.info('失败会话:');

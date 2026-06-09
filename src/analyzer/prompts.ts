@@ -1,123 +1,136 @@
 /**
  * LLM分析提示词模板
- * 定义销售对话分析的输出Schema与评分细则
+ * 客户识别与分类系统 — 两阶段分析
+ * 阶段1: 客户识别分类
+ * 阶段2: 关键信息提取（B端/C端分别处理）
  */
 
-export const ANALYSIS_PROMPT = `你是一个专业的销售对话分析助手。你的任务是对以下微信聊天记录进行深度分析，输出结构化的JSON结果。
+/**
+ * 阶段1：客户识别分类提示词
+ * 从聊天记录判断：B端客户 / C端客户 / 非客户
+ */
+export const CLASSIFICATION_PROMPT = `你是一个专业的客户识别助手。你的业务背景是：我们在做建筑行业相关的服务，包括：
+1. B端业务：帮助企业申报建筑资质、安全生产许可证等
+2. C端业务：为个人考生提供一建/二建等考试的题库、报名协助等服务
 
-## 分析维度
+请分析以下微信聊天记录，判断这个联系人是否是你的客户，以及属于哪种类型。
 
-请从以下六个维度进行分析：
+## 判断标准
 
-### 1. 客户画像 (customerProfile)
-- role: 客户的角色/职位（如"采购经理"、"技术总监"）
-- industry: 客户所属行业
-- companySize: 公司规模
-- keyNeeds: 客户表达的核心需求列表（最多5条）
-- decisionStage: 决策阶段（"awareness"/"consideration"/"decision"/"post-purchase"）
-- budgetSensitivity: 预算敏感度（"low"/"medium"/"high"）
-- communicationStyle: 沟通风格描述
-- interactionHistory: 历史交互摘要（100字内）
+### B端客户特征（企业/法人）
+- 聊的是公司资质申报、建筑资格证办理、企业相关事务
+- 提及公司名称、营业执照、资质等级
+- 询问报价、办理周期、需要提供的材料
+- 关键词：资质、申报、企业、公司、法人、许可证、建筑资质、安许、资质升级、资质转让
 
-### 2. 意向评级 (intentRating)
-- score: 1-10的整数，10表示极高购买意向
-- label: 根据分数映射——1-3为"cold"，4-6为"warm"，7-9为"hot"，10为"closed"
-- reasoning: 评级依据（50字内）
+### C端客户特征（个人考生）
+- 聊的是个人考试报名、题库、课程、学习资料
+- 提及一建、二建、一级建造师、二级建造师、造价师等
+- 询问报名时间、考试时间、题库价格、课程推荐
+- 关键词：一建、二建、建造师、考试、题库、报名、教材、备考、课程、真题、模拟题
 
-### 3. 销售质量评分 (salesQuality)
-- overallScore: 总分1-10
-- responsiveness: 响应及时性1-10
-- discoveryDepth: 需求挖掘深度1-10
-- valueClarity: 价值传递清晰度1-10
-- objectionHandling: 异议处理质量1-10
-- ctaEffectiveness: 行动引导能力1-10
-- suggestions: 改进建议列表（最多3条）
+### 非客户特征
+- 日常聊天、朋友寒暄、家庭话题
+- 工作无关的闲聊、群通知、公众号推送
+- 明显不是建筑行业相关业务的对话
 
-### 4. 待跟进事项 (followUps)
-每项包含：
-- description: 事项描述
-- priority: "high"/"medium"/"low"
-- suggestedDeadline: 建议截止日期（ISO 8601格式，可选）
-- relatedMsgIndices: 关联消息索引数组
+## 输出格式
 
-### 5. 情感趋势 (sentimentTrends)
-识别对话中关键情感转折点，每项包含：
-- timestamp: 时间点
-- score: -1到1的情感分数
-- label: "positive"/"neutral"/"negative"
-- trigger: 触发摘要
-
-### 6. 风险标记 (riskFlags)
-识别潜在风险信号，每项包含：
-- type: "complaint"/"churn"/"delay"/"misunderstanding"/"competitor"/"other"
-- severity: "critical"/"warning"/"info"
-- description: 描述
-- relatedMsgIndices: 关联消息索引数组
-
-## 输出格式要求
-
-必须返回合法的JSON对象，不要包含任何markdown代码块标记或其他说明文字。JSON结构如下：
+必须返回JSON，不要其他内容：
 
 {
-  "customerProfile": { ... },
-  "intentRating": { ... },
-  "salesQuality": { ... },
-  "followUps": [ ... ],
-  "sentimentTrends": [ ... ],
-  "riskFlags": [ ... ],
-  "keyInsights": ["洞察1", "洞察2", ...],
-  "summary": "会话摘要（50字内）"
+  "isCustomer": true/false,
+  "customerType": "b2b" | "b2c" | null,
+  "subType": "公司法人" | "企业经办人" | "一建考生" | "二建考生" | "造价师考生" | "其他考生" | null,
+  "confidence": 0.0-1.0,
+  "reasoning": "判断理由（30字内）"
 }
 
-## 评分细则
+注意：
+- 只要对话中有任何建筑行业业务相关的内容，就应该识别为客户
+- 如果无法确定，confidence 设为 0.5 以下
+- 非客户时 customerType 和 subType 为 null`;
 
-- 意向评级标准：
-  - cold(1-3): 仅初步了解，未表达明确需求，回复冷淡
-  - warm(4-6): 表达了一定兴趣，询问了产品细节或价格
-  - hot(7-9): 明确表示购买意愿，讨论实施细节或合同
-  - closed(10): 已确认合作，进入签约或付款阶段
+/**
+ * 阶段2-B端：关键信息提取提示词
+ */
+export const B2B_EXTRACTION_PROMPT = `你是一个建筑行业B端客户信息提取助手。请从以下聊天记录中提取客户的业务关键信息。
 
-- 销售质量扣分项：
-  - 客户提问后超过2小时未回复（responsiveness扣分）
-  - 未询问客户具体需求场景（discoveryDepth扣分）
-  - 仅发送产品介绍未关联客户需求（valueClarity扣分）
-  - 遇到异议未回应或回避（objectionHandling扣分）
-  - 未明确提出下一步行动（ctaEffectiveness扣分）`;
+## 需要提取的字段
 
-export const FALLBACK_PROMPT = `你是一个销售对话分析助手。请对以下聊天记录进行简要分析，输出JSON格式结果。
+- companyName: 公司名称（如有，优先用客户提到的正式名称）
+- contactName: 联系人姓名/称呼（如有提及真实姓名，不要用微信昵称）
+- contactRole: 联系人在公司的角色（法人、经办人、项目经理、老板等）
+- demandType: 需求大类（"建筑资质申报" | "安全生产许可证" | "资质升级" | "资质转让" | "资质维护" | "其他"）
+- demandDetail: 具体需求描述（50字内，概括客户想要什么）
+- region: 公司所在地区或项目地区（省/市）
+- urgency: 紧急程度（"high" | "medium" | "low"），从客户催促程度判断
+- budgetRange: 预算范围（如有提及，如"5-10万"，没有填null）
+- followUpStatus: 跟进状态（"new"首次咨询 | "contacted"已联系 | "quoted"已报价 | "negotiating"洽谈中 | "closed"已成交）
+- projectTypes: 涉及的项目类型列表（如["建筑资质", "安许"]）
 
-由于上下文限制，请仅输出以下核心字段：
+## 输出格式
 
 {
-  "customerProfile": {
-    "keyNeeds": ["需求1", "需求2"],
-    "interactionHistory": "简要历史"
-  },
-  "intentRating": {
-    "score": 5,
-    "label": "warm",
-    "reasoning": "简要理由"
-  },
-  "salesQuality": {
-    "overallScore": 5,
-    "responsiveness": 5,
-    "discoveryDepth": 5,
-    "valueClarity": 5,
-    "objectionHandling": 5,
-    "ctaEffectiveness": 5,
-    "suggestions": []
-  },
-  "followUps": [
-    {
-      "description": "待办事项",
-      "priority": "medium",
-      "relatedMsgIndices": []
-    }
-  ],
-  "sentimentTrends": [],
-  "riskFlags": [],
-  "keyInsights": [],
-  "summary": "简要摘要"
+  "companyName": "...",
+  "contactName": "...",
+  "contactRole": "...",
+  "demandType": "...",
+  "demandDetail": "...",
+  "region": "...",
+  "urgency": "...",
+  "budgetRange": "...",
+  "followUpStatus": "...",
+  "projectTypes": ["..."]
+}
+
+没有的信息字段设为 null 或省略。不要编造信息。`;
+
+/**
+ * 阶段2-C端：关键信息提取提示词
+ */
+export const B2C_EXTRACTION_PROMPT = `你是一个建筑考试培训行业客户信息提取助手。请从以下聊天记录中提取考生的关键信息。
+
+## 需要提取的字段
+
+- name: 客户真实姓名（如有提及，不要用微信昵称）
+- examType: 考试类型（"一级建造师" | "二级建造师" | "一级造价师" | "二级造价师" | "监理工程师" | "安全工程师" | "消防工程师" | "其他"）
+- examYear: 计划考试年份（如"2026年"，未提及填null）
+- demandType: 需求类型（"题库" | "报名协助" | "课程" | "学习资料" | "咨询服务" | "其他"）
+- major: 报考专业（"建筑工程" | "市政工程" | "机电工程" | "公路工程" | "水利水电" | "矿业工程" | "铁路工程" | "民航工程" | "港口与航道" | "通信广电" 等）
+- region: 报考地区/省份
+- studyStage: 学习阶段（"刚开始了解" | "备考中" | "已报名未考试" | "已通过部分科目" | "二战/再战"）
+- purchaseHistory: 已购买过的产品列表（如["2025年二建题库"]）
+- followUpStatus: 跟进状态（"new"新咨询 | "interested"有兴趣 | "purchased"已购买 | "inactive"已沉寂）
+
+## 输出格式
+
+{
+  "name": "...",
+  "examType": "...",
+  "examYear": "...",
+  "demandType": "...",
+  "major": "...",
+  "region": "...",
+  "studyStage": "...",
+  "purchaseHistory": ["..."],
+  "followUpStatus": "..."
+}
+
+没有的信息字段设为 null 或省略。不要编造信息。`;
+
+/**
+ * 降级提示词：用于模型失败时，仅做分类不做提取
+ */
+export const FALLBACK_CLASSIFICATION_PROMPT = `你是一个客户识别助手。请简要分析以下微信聊天记录，判断是否是建筑行业相关客户。
+
+返回JSON格式：
+{
+  "isCustomer": true/false,
+  "customerType": "b2b" | "b2c" | null,
+  "subType": null,
+  "confidence": 0.5,
+  "reasoning": "简要理由"
 }
 
 只输出JSON，不要其他内容。`;

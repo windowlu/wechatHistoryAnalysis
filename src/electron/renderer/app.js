@@ -1,5 +1,5 @@
 /**
- * 微信聊天记录分析工具 — 渲染进程前端逻辑
+ * 微信客户识别系统 — 渲染进程前端逻辑
  * 三页式 SPA：配置页 → 运行中页 → 结果页
  */
 
@@ -41,6 +41,9 @@ const els = {
   apiKey: $('api-key'),
   primaryModel: $('primary-model'),
   fallbackModel: $('fallback-model'),
+  filterNonCustomers: $('filter-non-customers'),
+  targetCustomerType: $('target-customer-type'),
+  minConfidence: $('min-confidence'),
   decryptToolType: $('decrypt-tool-type'),
   pythonPath: $('python-path'),
   concurrency: $('concurrency'),
@@ -60,9 +63,9 @@ const els = {
 
   // 结果页
   statDuration: $('stat-duration'),
-  statSessions: $('stat-sessions'),
-  statSuccess: $('stat-success'),
-  statFailed: $('stat-failed'),
+  statCustomers: $('stat-customers'),
+  statB2b: $('stat-b2b'),
+  statB2c: $('stat-b2c'),
   sessionsTbody: $('sessions-tbody'),
   outputFiles: $('output-files'),
   btnBack: $('btn-back'),
@@ -127,6 +130,11 @@ function buildConfig() {
       compressionThreshold: 6000,
       batchSize: parseInt(els.batchSize.value, 10) || 10,
       enforceJsonMode: true,
+      classification: {
+        filterNonCustomers: els.filterNonCustomers.checked,
+        minConfidence: parseFloat(els.minConfidence.value) || 0.6,
+        targetCustomerType: els.targetCustomerType.value || undefined,
+      },
       validation: {
         enableRangeCheck: true,
         enableConsistencyCheck: true,
@@ -150,6 +158,12 @@ function loadConfigIntoForm(config) {
   if (config.analyzer?.llm?.apiKey) els.apiKey.value = config.analyzer.llm.apiKey;
   if (config.analyzer?.llm?.primaryModel) els.primaryModel.value = config.analyzer.llm.primaryModel;
   if (config.analyzer?.llm?.fallbackModel) els.fallbackModel.value = config.analyzer.llm.fallbackModel;
+  if (config.analyzer?.classification) {
+    const cls = config.analyzer.classification;
+    if (typeof cls.filterNonCustomers === 'boolean') els.filterNonCustomers.checked = cls.filterNonCustomers;
+    if (cls.minConfidence !== undefined) els.minConfidence.value = cls.minConfidence;
+    if (cls.targetCustomerType) els.targetCustomerType.value = cls.targetCustomerType;
+  }
   if (config.decryptor?.toolType) els.decryptToolType.value = config.decryptor.toolType;
   if (config.decryptor?.pythonPath) els.pythonPath.value = config.decryptor.pythonPath;
   if (config.analyzer?.concurrencyLimit) els.concurrency.value = config.analyzer.concurrencyLimit;
@@ -293,14 +307,16 @@ function renderOverview(result) {
   const duration = stats.durationMs || 0;
   els.statDuration.textContent = formatDuration(duration);
 
-  const norm = result.stages?.normalization;
-  els.statSessions.textContent = norm?.sessionCount ?? '-';
-
   const analysis = result.stages?.analysis;
-  const successCount = analysis?.stats?.successCount ?? 0;
-  const failCount = analysis?.stats?.failCount ?? 0;
-  els.statSuccess.textContent = successCount;
-  els.statFailed.textContent = failCount;
+  if (analysis?.stats) {
+    els.statCustomers.textContent = analysis.stats.customerCount ?? '-';
+    els.statB2b.textContent = analysis.stats.b2bCount ?? '-';
+    els.statB2c.textContent = analysis.stats.b2cCount ?? '-';
+  } else {
+    els.statCustomers.textContent = '-';
+    els.statB2b.textContent = '-';
+    els.statB2c.textContent = '-';
+  }
 }
 
 function formatDuration(ms) {
@@ -316,73 +332,78 @@ function renderCharts(result) {
   const analysis = result.stages?.analysis;
   if (!analysis?.success?.length) return;
 
-  // 计算各维度平均分
-  const dimensions = ['willingness', 'need', 'intention', 'sentiment', 'overall'];
-  const dimLabels = { willingness: '意愿', need: '需求', intention: '意向', sentiment: '情感', overall: '综合' };
-  const dimScores = {};
+  const success = analysis.success;
 
-  dimensions.forEach((dim) => {
-    const scores = analysis.success
-      .filter((s) => s.scores && typeof s.scores[dim] === 'number')
-      .map((s) => s.scores[dim]);
-    dimScores[dim] = scores.length ? scores.reduce((a, b) => a + b, 0) / scores.length : 0;
+  // ═══════════════════════════════════════════════════════════
+  // 客户类型分布饼图
+  // ═══════════════════════════════════════════════════════════
+  const b2bCount = success.filter((s) => s.classification?.customerType === 'b2b').length;
+  const b2cCount = success.filter((s) => s.classification?.customerType === 'b2c').length;
+  const nonCustomerCount = success.filter((s) => !s.classification?.isCustomer).length;
+
+  const typeChart = echarts.init($('chart-type-distribution'));
+  typeChart.setOption({
+    tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
+    legend: { bottom: 0, data: ['B端客户', 'C端客户', '非客户'] },
+    series: [{
+      type: 'pie',
+      radius: ['40%', '70%'],
+      center: ['50%', '45%'],
+      avoidLabelOverlap: false,
+      itemStyle: { borderRadius: 6, borderColor: '#fff', borderWidth: 2 },
+      label: { show: false },
+      emphasis: { label: { show: true, fontSize: 14, fontWeight: 'bold' } },
+      data: [
+        { value: b2bCount, name: 'B端客户', itemStyle: { color: '#07c160' } },
+        { value: b2cCount, name: 'C端客户', itemStyle: { color: '#10aeff' } },
+        { value: nonCustomerCount, name: '非客户', itemStyle: { color: '#c9c9c9' } },
+      ],
+    }],
   });
 
-  // 维度柱状图
-  const dimChart = echarts.init($('chart-dimensions'));
-  dimChart.setOption({
-    tooltip: { trigger: 'axis' },
+  // ═══════════════════════════════════════════════════════════
+  // 需求类型分布柱状图
+  // ═══════════════════════════════════════════════════════════
+  const demandMap = new Map();
+  for (const s of success) {
+    if (!s.classification?.isCustomer || !s.customerInfo) continue;
+    const demand = s.customerInfo.demandType;
+    if (demand) {
+      demandMap.set(demand, (demandMap.get(demand) || 0) + 1);
+    }
+  }
+
+  const demandData = Array.from(demandMap.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 10);
+
+  const demandChart = echarts.init($('chart-demand-distribution'));
+  demandChart.setOption({
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+    grid: { left: '3%', right: '4%', bottom: '3%', top: '10%', containLabel: true },
     xAxis: {
       type: 'category',
-      data: dimensions.map((d) => dimLabels[d] || d),
-      axisLabel: { fontSize: 12 },
+      data: demandData.map((d) => d[0]),
+      axisLabel: { fontSize: 11, rotate: 30 },
     },
-    yAxis: { type: 'value', min: 0, max: 100 },
+    yAxis: { type: 'value', minInterval: 1 },
     series: [{
       type: 'bar',
-      data: dimensions.map((d) => Number(dimScores[d].toFixed(1))),
-      itemStyle: { color: '#07c160', borderRadius: [4, 4, 0, 0] },
+      data: demandData.map((d) => d[1]),
+      itemStyle: {
+        color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+          { offset: 0, color: '#07c160' },
+          { offset: 1, color: '#2ee593' },
+        ]),
+        borderRadius: [4, 4, 0, 0],
+      },
       barWidth: '50%',
     }],
-    grid: { left: '10%', right: '10%', bottom: '15%', top: '15%' },
-  });
-
-  // 得分分布图
-  const overallScores = analysis.success
-    .filter((s) => s.scores && typeof s.scores.overall === 'number')
-    .map((s) => s.scores.overall);
-
-  const bins = { '0-20': 0, '21-40': 0, '41-60': 0, '61-80': 0, '81-100': 0 };
-  overallScores.forEach((s) => {
-    if (s <= 20) bins['0-20']++;
-    else if (s <= 40) bins['21-40']++;
-    else if (s <= 60) bins['41-60']++;
-    else if (s <= 80) bins['61-80']++;
-    else bins['81-100']++;
-  });
-
-  const distChart = echarts.init($('chart-distribution'));
-  distChart.setOption({
-    tooltip: { trigger: 'axis' },
-    xAxis: {
-      type: 'category',
-      data: Object.keys(bins),
-      axisLabel: { fontSize: 12 },
-    },
-    yAxis: { type: 'value' },
-    series: [{
-      type: 'bar',
-      data: Object.values(bins),
-      itemStyle: { color: '#10aeff', borderRadius: [4, 4, 0, 0] },
-      barWidth: '50%',
-    }],
-    grid: { left: '10%', right: '10%', bottom: '15%', top: '15%' },
   });
 }
 
 function renderSessions(result) {
   const analysis = result.stages?.analysis;
-  const norm = result.stages?.normalization;
   if (!analysis) {
     els.sessionsTbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:#999">无分析数据</td></tr>';
     return;
@@ -390,10 +411,6 @@ function renderSessions(result) {
 
   // 合并成功和失败的会话数据
   const sessionMap = new Map();
-
-  // 从 normalization 获取消息数
-  const sessions = norm?.sessionCount || 0;
-  // 这里需要从 analysis 的 success 和 failed 中获取 talkerId
 
   analysis.success.forEach((s) => {
     sessionMap.set(s.talkerId, { ...s, status: 'success' });
@@ -410,22 +427,48 @@ function renderSessions(result) {
   });
 
   const rows = Array.from(sessionMap.values());
+
   els.sessionsTbody.innerHTML = rows
     .map((s) => {
       const isFailed = s.status === 'failed';
-      const scores = s.scores || {};
+      const cls = s.classification || {};
+      const isCustomer = cls.isCustomer;
+      const customerType = cls.customerType || '';
+      const subType = cls.subType || '';
+      const confidence = cls.confidence ?? 0;
+
+      // 提取关键信息
+      let demandOrExam = '-';
+      let region = '-';
+      let followUpStatus = '-';
+
+      if (isCustomer && s.customerInfo) {
+        const info = s.customerInfo;
+        if (customerType === 'b2b') {
+          demandOrExam = info.demandType || info.demandDetail || '-';
+          region = info.region || '-';
+          followUpStatus = info.followUpStatus || '-';
+        } else {
+          demandOrExam = info.examType || info.demandType || '-';
+          region = info.region || '-';
+          followUpStatus = info.followUpStatus || '-';
+        }
+      }
+
+      const typeBadge = isCustomer
+        ? `<span class="type-badge ${customerType}">${customerType === 'b2b' ? 'B端' : 'C端'}</span>`
+        : '<span class="type-badge non">非客户</span>';
+
       return `
         <tr class="${isFailed ? 'failed' : ''}">
-          <td title="${s.talkerId}">${truncate(s.talkerId, 20)}</td>
+          <td title="${s.talkerId}">${truncate(s.talkerName || s.talkerId, 16)}</td>
+          <td>${typeBadge}</td>
+          <td>${subType || '-'}</td>
+          <td>${demandOrExam}</td>
+          <td>${region}</td>
+          <td>${followUpStatus}</td>
+          <td>${isCustomer ? (confidence * 100).toFixed(0) + '%' : '-'}</td>
           <td>${s.messageCount ?? '-'}</td>
-          <td>${scores.willingness ?? '-'}</td>
-          <td>${scores.need ?? '-'}</td>
-          <td>${scores.intention ?? '-'}</td>
-          <td>${scores.sentiment ?? '-'}</td>
-          <td><strong>${scores.overall ?? '-'}</strong></td>
-          <td>
-            <span class="status-badge ${s.status}">${isFailed ? '失败' : '成功'}</span>
-          </td>
           <td>
             ${isFailed && s.retryable !== false
               ? `<button class="btn-small btn-secondary" onclick="retrySession('${s.talkerId}')">重试</button>`
@@ -478,7 +521,6 @@ window.openFile = (filePath) => {
 
 window.retrySession = (talkerId) => {
   if (!currentConfig) return;
-  // 构造重试
   lastResult = null;
   els.progressBar.style.width = '0%';
   els.progressPercent.textContent = '0%';

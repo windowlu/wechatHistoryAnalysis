@@ -245,112 +245,85 @@ export interface NormalizerConfig {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// 分析层类型
+// 分析层类型（客户识别与分类系统）
 // ═════════════════════════════════════════════════════════════════════════════
 
-/** 客户意向评级 */
-export interface IntentRating {
-  /** 评级分数 1-10 */
-  score: number;
-  /** 评级标签 */
-  label: 'cold' | 'warm' | 'hot' | 'closed';
-  /** 评级依据摘要 */
+/** 联系人分类结果 */
+export interface ContactClassification {
+  /** 是否为客户 */
+  isCustomer: boolean;
+  /** 客户类型 */
+  customerType?: 'b2b' | 'b2c';
+  /** 客户子类型（更细分） */
+  subType?: string;
+  /** 分类置信度 0-1 */
+  confidence: number;
+  /** 分类理由 */
   reasoning: string;
 }
 
-/** 销售质量评分 */
-export interface SalesQuality {
-  /** 总分 1-10 */
-  overallScore: number;
-  /** 响应及时性 */
-  responsiveness: number;
-  /** 需求挖掘深度 */
-  discoveryDepth: number;
-  /** 价值传递清晰度 */
-  valueClarity: number;
-  /** 异议处理质量 */
-  objectionHandling: number;
-  /** 行动引导能力 */
-  ctaEffectiveness: number;
-  /** 改进建议 */
-  suggestions: string[];
+/** B端客户关键信息 */
+export interface B2BCustomerInfo {
+  /** 公司名称 */
+  companyName?: string;
+  /** 联系人姓名 */
+  contactName?: string;
+  /** 联系人职位/角色 */
+  contactRole?: string;
+  /** 需求类型 */
+  demandType?: string;
+  /** 具体需求描述 */
+  demandDetail?: string;
+  /** 公司/项目地区 */
+  region?: string;
+  /** 紧急程度 */
+  urgency?: 'high' | 'medium' | 'low';
+  /** 预算范围 */
+  budgetRange?: string;
+  /** 跟进状态 */
+  followUpStatus?: 'new' | 'contacted' | 'quoted' | 'negotiating' | 'closed';
+  /** 关联的项目/资质类型 */
+  projectTypes?: string[];
 }
 
-/** 待跟进事项 */
-export interface FollowUpItem {
-  /** 事项描述 */
-  description: string;
-  /** 优先级 */
-  priority: 'high' | 'medium' | 'low';
-  /** 建议截止日期 */
-  suggestedDeadline?: string;
-  /** 关联消息索引 */
-  relatedMsgIndices: number[];
+/** C端客户关键信息 */
+export interface B2CCustomerInfo {
+  /** 客户姓名 */
+  name?: string;
+  /** 考试类型 */
+  examType?: string;
+  /** 报考年份/计划 */
+  examYear?: string;
+  /** 需求类型 */
+  demandType?: string;
+  /** 专业方向 */
+  major?: string;
+  /** 地区 */
+  region?: string;
+  /** 学习阶段 */
+  studyStage?: string;
+  /** 购买记录 */
+  purchaseHistory?: string[];
+  /** 跟进状态 */
+  followUpStatus?: 'new' | 'interested' | 'purchased' | 'inactive';
 }
 
-/** 情感趋势节点 */
-export interface SentimentTrend {
-  /** 节点时间 */
-  timestamp: string;
-  /** 情感分数 -1~1 */
-  score: number;
-  /** 情感标签 */
-  label: 'positive' | 'neutral' | 'negative';
-  /** 触发摘要 */
-  trigger: string;
-}
-
-/** 风险标记 */
-export interface RiskFlag {
-  /** 风险类型 */
-  type: 'complaint' | 'churn' | 'delay' | 'misunderstanding' | 'competitor' | 'other';
-  /** 严重程度 */
-  severity: 'critical' | 'warning' | 'info';
-  /** 描述 */
-  description: string;
-  /** 关联消息索引 */
-  relatedMsgIndices: number[];
-}
-
-/** 会话分析结果 */
+/** 会话分析结果（客户识别版） */
 export interface SessionAnalysis {
   /** 会话ID */
   talkerId: string;
   /** 会话名称 */
   talkerName: string;
-  /** 客户画像 */
-  customerProfile: {
-    /** 客户角色/职位 */
-    role?: string;
-    /** 所属行业 */
-    industry?: string;
-    /** 公司规模 */
-    companySize?: string;
-    /** 核心需求摘要 */
-    keyNeeds: string[];
-    /** 决策阶段 */
-    decisionStage?: string;
-    /** 预算敏感度 */
-    budgetSensitivity?: 'low' | 'medium' | 'high';
-    /** 沟通风格 */
-    communicationStyle?: string;
-    /** 历史交互摘要 */
-    interactionHistory: string;
-  };
-  /** 意向评级 */
-  intentRating: IntentRating;
-  /** 销售质量评分 */
-  salesQuality: SalesQuality;
-  /** 待跟进事项 */
-  followUps: FollowUpItem[];
-  /** 情感趋势 */
-  sentimentTrends: SentimentTrend[];
-  /** 风险标记 */
-  riskFlags: RiskFlag[];
+  /** 分类结果 */
+  classification: ContactClassification;
+  /** 客户关键信息（仅对客户填充） */
+  customerInfo?: B2BCustomerInfo | B2CCustomerInfo;
   /** 关键洞察 */
   keyInsights: string[];
-  /** 会话摘要（50字内） */
-  summary: string;
+  /** 最后活跃时间 */
+  lastActiveAt: string;
+  /** 消息总数 */
+  messageCount: number;
   /** 分析时间 */
   analyzedAt: string;
   /** 使用的模型 */
@@ -379,6 +352,16 @@ export interface LLMConfig {
   maxRetries: number;
 }
 
+/** 客户识别配置 */
+export interface ClassificationConfig {
+  /** 过滤非客户（只保留客户） */
+  filterNonCustomers: boolean;
+  /** 最低分类置信度阈值（低于此值标记为不确定） */
+  minConfidence: number;
+  /** 目标客户类型（null=全部） */
+  targetCustomerType?: 'b2b' | 'b2c';
+}
+
 /** 分析层配置 */
 export interface AnalyzerConfig {
   /** LLM配置 */
@@ -391,6 +374,8 @@ export interface AnalyzerConfig {
   batchSize: number;
   /** 是否启用JSON模式强制输出 */
   enforceJsonMode: boolean;
+  /** 客户识别配置 */
+  classification: ClassificationConfig;
   /** 输出校验开关 */
   validation: {
     enableRangeCheck: boolean;
@@ -413,6 +398,10 @@ export interface AnalysisResult {
     totalSessions: number;
     successCount: number;
     failCount: number;
+    customerCount: number;
+    b2bCount: number;
+    b2cCount: number;
+    nonCustomerCount: number;
     totalDurationMs: number;
     avgDurationMs: number;
     tokenUsage?: { prompt: number; completion: number };

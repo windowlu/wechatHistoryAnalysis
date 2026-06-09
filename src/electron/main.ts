@@ -14,7 +14,7 @@ function createWindow(): void {
     height: 750,
     minWidth: 900,
     minHeight: 600,
-    title: '微信聊天记录分析工具',
+    title: '微信客户识别系统',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,

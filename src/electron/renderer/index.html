@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>微信聊天记录分析工具</title>
+  <title>微信客户识别系统</title>
   <link rel="stylesheet" href="./style.css">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
 </head>
@@ -11,8 +11,8 @@
   <!-- 配置页 -->
   <div id="config-page" class="page active">
     <header class="app-header">
-      <h1>微信聊天记录分析工具</h1>
-      <p class="subtitle">销售对话智能分析系统</p>
+      <h1>微信客户识别系统</h1>
+      <p class="subtitle">从聊天记录中自动识别B端/C端客户并提取关键信息</p>
     </header>
 
     <main class="config-form">
@@ -56,6 +56,32 @@
           <div class="form-group half">
             <label for="fallback-model">备用模型</label>
             <input type="text" id="fallback-model" placeholder="gpt-4o-mini" value="gpt-4o-mini">
+          </div>
+        </div>
+      </section>
+
+      <section class="form-section">
+        <h2>客户识别配置</h2>
+
+        <div class="form-group">
+          <label class="checkbox-label">
+            <input type="checkbox" id="filter-non-customers" checked>
+            <span>过滤非客户（只保留识别为客户的联系人）</span>
+          </label>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group half">
+            <label for="target-customer-type">目标客户类型</label>
+            <select id="target-customer-type">
+              <option value="">全部</option>
+              <option value="b2b">B端客户（企业/法人）</option>
+              <option value="b2c">C端客户（个人考生）</option>
+            </select>
+          </div>
+          <div class="form-group half">
+            <label for="min-confidence">最低置信度 (0-1)</label>
+            <input type="number" id="min-confidence" value="0.6" min="0" max="1" step="0.1">
           </div>
         </div>
       </section>
@@ -109,7 +135,7 @@
       </section>
 
       <div class="form-actions">
-        <button id="btn-start" class="btn-primary btn-large">开始分析</button>
+        <button id="btn-start" class="btn-primary btn-large">开始识别</button>
       </div>
     </main>
   </div>
@@ -117,7 +143,7 @@
   <!-- 运行中页 -->
   <div id="running-page" class="page">
     <header class="app-header">
-      <h1>分析中...</h1>
+      <h1>识别中...</h1>
     </header>
 
     <main class="running-panel">
@@ -145,7 +171,7 @@
   <!-- 结果页 -->
   <div id="result-page" class="page">
     <header class="app-header">
-      <h1>分析结果</h1>
+      <h1>识别结果</h1>
     </header>
 
     <main class="result-panel">
@@ -155,47 +181,47 @@
           <div class="card-value" id="stat-duration">-</div>
           <div class="card-label">总耗时</div>
         </div>
-        <div class="card">
-          <div class="card-value" id="stat-sessions">-</div>
-          <div class="card-label">会话数</div>
-        </div>
         <div class="card success">
-          <div class="card-value" id="stat-success">-</div>
-          <div class="card-label">成功</div>
+          <div class="card-value" id="stat-customers">-</div>
+          <div class="card-label">客户总数</div>
         </div>
-        <div class="card error">
-          <div class="card-value" id="stat-failed">-</div>
-          <div class="card-label">失败</div>
+        <div class="card">
+          <div class="card-value" id="stat-b2b">-</div>
+          <div class="card-label">B端客户</div>
+        </div>
+        <div class="card">
+          <div class="card-value" id="stat-b2c">-</div>
+          <div class="card-label">C端客户</div>
         </div>
       </div>
 
       <!-- 图表区域 -->
       <div class="charts-area">
         <div class="chart-box">
-          <h3>维度平均分</h3>
-          <div id="chart-dimensions" class="chart-container"></div>
+          <h3>客户类型分布</h3>
+          <div id="chart-type-distribution" class="chart-container"></div>
         </div>
         <div class="chart-box">
-          <h3>得分分布</h3>
-          <div id="chart-distribution" class="chart-container"></div>
+          <h3>需求类型分布</h3>
+          <div id="chart-demand-distribution" class="chart-container"></div>
         </div>
       </div>
 
-      <!-- 会话列表 -->
+      <!-- 客户列表 -->
       <div class="sessions-area">
-        <h3>会话详情</h3>
+        <h3>客户列表</h3>
         <div class="table-container">
           <table id="sessions-table">
             <thead>
               <tr>
                 <th>会话</th>
+                <th>类型</th>
+                <th>子类型</th>
+                <th>需求/考试</th>
+                <th>地区</th>
+                <th>跟进状态</th>
+                <th>置信度</th>
                 <th>消息数</th>
-                <th>意愿</th>
-                <th>需求</th>
-                <th>意向</th>
-                <th>情感</th>
-                <th>综合</th>
-                <th>状态</th>
                 <th>操作</th>
               </tr>
             </thead>

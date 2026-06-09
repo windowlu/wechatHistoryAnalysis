@@ -625,6 +625,46 @@ td .status-badge {
   background: #a8a8a8;
 }
 
+/* 客户类型标签 */
+.type-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.type-badge.b2b {
+  background: #e6f7ed;
+  color: #07c160;
+}
+
+.type-badge.b2c {
+  background: #e6f4ff;
+  color: #10aeff;
+}
+
+.type-badge.non {
+  background: #f0f0f0;
+  color: #999;
+}
+
+/* 复选框样式 */
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+.checkbox-label input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--primary);
+}
+
 /* 响应式 */
 @media (max-width: 900px) {
   .overview-cards {

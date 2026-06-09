@@ -9,6 +9,7 @@
     "pywxdumpModule": "pywxdump",
     "pywxdumpBiasArgs": [],
     "strategy": "memory",
+    "outputDir": "./temp/decrypted",
     "concurrency": 3
   },
   "normalizer": {
@@ -37,6 +38,11 @@
     "compressionThreshold": 6000,
     "batchSize": 10,
     "enforceJsonMode": true,
+    "classification": {
+      "filterNonCustomers": true,
+      "minConfidence": 0.6,
+      "targetCustomerType": null
+    },
     "validation": {
       "enableRangeCheck": true,
       "enableConsistencyCheck": true

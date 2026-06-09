@@ -1,15 +1,31 @@
 /**
  * 分析层 (Analyzer)
- * 由AXIOM执行框架驱动，按会话维度进行批量LLM分析
- * 包含会话分片、并发控制、降级策略、输出校验
+ * 客户识别与分类系统
+ * 两阶段分析流程：
+ *   阶段1: 客户识别分类（全部会话）
+ *   阶段2: 关键信息提取（仅客户会话）
  */
 
 import axios, { AxiosError } from 'axios';
-import { NormalizedSession, SessionAnalysis, AnalyzerConfig, AnalysisResult, LLMConfig } from '../types';
+import {
+  NormalizedSession,
+  SessionAnalysis,
+  AnalyzerConfig,
+  AnalysisResult,
+  LLMConfig,
+  ContactClassification,
+  B2BCustomerInfo,
+  B2CCustomerInfo,
+} from '../types';
 import { logger } from '../utils/logger';
 import { chunkArray } from '../utils/stream-helper';
-import { ANALYSIS_PROMPT, FALLBACK_PROMPT } from './prompts';
-import { validateAnalysisOutput } from './validator';
+import {
+  CLASSIFICATION_PROMPT,
+  B2B_EXTRACTION_PROMPT,
+  B2C_EXTRACTION_PROMPT,
+  FALLBACK_CLASSIFICATION_PROMPT,
+} from './prompts';
+import { validateClassification, validateCustomerInfo } from './validator';
 
 // 动态导入p-limit以避免ESM/CJS兼容问题
 let pLimit: (concurrency: number) => <T>(fn: () => Promise<T>) => Promise<T>;
@@ -28,29 +44,215 @@ export class Analyzer {
   }
 
   /**
-   * 执行全部分析
+   * 执行两阶段全部分析
+   * 阶段1: 对所有会话进行客户识别分类
+   * 阶段2: 对识别为客户的会话提取关键信息
    */
   async analyze(sessions: NormalizedSession[]): Promise<AnalysisResult> {
     logger.info(`分析层: 开始分析 ${sessions.length} 个会话`);
     const startTime = Date.now();
 
-    const success: SessionAnalysis[] = [];
+    // ═══════════════════════════════════════════════════════
+    // 阶段1: 客户识别分类
+    // ═══════════════════════════════════════════════════════
+    logger.info('阶段1: 客户识别分类');
+    const classificationResult = await this.classifySessions(sessions);
+
+    const customerClassifications = classificationResult.results;
+    const classifyFailed = classificationResult.failed;
+
+    // 统计分类结果
+    const customerCount = customerClassifications.filter((c) => c.isCustomer).length;
+    const b2bCount = customerClassifications.filter((c) => c.customerType === 'b2b').length;
+    const b2cCount = customerClassifications.filter((c) => c.customerType === 'b2c').length;
+    const nonCustomerCount = sessions.length - customerCount;
+
+    logger.info(
+      `分类完成: 客户 ${customerCount} (B端 ${b2bCount}, C端 ${b2cCount}), 非客户 ${nonCustomerCount}, 失败 ${classifyFailed.length}`,
+    );
+
+    // ═══════════════════════════════════════════════════════
+    // 阶段2: 关键信息提取（仅对客户）
+    // ═══════════════════════════════════════════════════════
+    // 筛选需要提取信息的客户会话
+    const customerSessions: NormalizedSession[] = [];
+    const customerClassificationsList: ContactClassification[] = [];
+
+    for (let i = 0; i < sessions.length; i++) {
+      const cls = customerClassifications[i];
+      if (cls.isCustomer) {
+        // 如果设置了目标客户类型过滤
+        const targetType = this.config.classification.targetCustomerType;
+        if (targetType && cls.customerType !== targetType) {
+          continue;
+        }
+        customerSessions.push(sessions[i]);
+        customerClassificationsList.push(cls);
+      }
+    }
+
+    logger.info(`阶段2: 关键信息提取 (${customerSessions.length} 个客户会话)`);
+    const extractionResult = await this.extractCustomerInfo(customerSessions, customerClassificationsList);
+
+    // ═══════════════════════════════════════════════════════
+    // 组装最终结果
+    // ═══════════════════════════════════════════════════════
+    const success: SessionAnalysis[] = extractionResult.results;
+    const extractFailed = extractionResult.failed;
+
+    // 如果不过滤非客户，将非客户也加入结果（仅含分类信息）
+    if (!this.config.classification.filterNonCustomers) {
+      for (let i = 0; i < sessions.length; i++) {
+        const cls = customerClassifications[i];
+        if (!cls.isCustomer) {
+          success.push({
+            talkerId: sessions[i].talkerId,
+            talkerName: sessions[i].name,
+            classification: cls,
+            keyInsights: [],
+            lastActiveAt: sessions[i].timeRange.end,
+            messageCount: sessions[i].messages.length,
+            analyzedAt: new Date().toISOString(),
+            model: 'classification-only',
+          });
+        }
+      }
+    }
+
+    const totalDurationMs = Date.now() - startTime;
+    const avgDurationMs = success.length > 0 ? Math.round(totalDurationMs / success.length) : 0;
+
+    logger.info(
+      `分析层完成: 成功 ${success.length}/${sessions.length}, 分类失败 ${classifyFailed.length}, 提取失败 ${extractFailed.length}, 耗时 ${totalDurationMs}ms`,
+    );
+
+    return {
+      success,
+      failed: [...classifyFailed, ...extractFailed],
+      stats: {
+        totalSessions: sessions.length,
+        successCount: success.length,
+        failCount: classifyFailed.length + extractFailed.length,
+        customerCount,
+        b2bCount,
+        b2cCount,
+        nonCustomerCount,
+        totalDurationMs,
+        avgDurationMs,
+      },
+    };
+  }
+
+  /**
+   * 阶段1: 批量客户识别分类
+   */
+  private async classifySessions(sessions: NormalizedSession[]): Promise<{
+    results: ContactClassification[];
+    failed: Array<{ talkerId: string; reason: string; retryable: boolean }>;
+  }> {
+    const results: ContactClassification[] = new Array(sessions.length);
     const failed: Array<{ talkerId: string; reason: string; retryable: boolean }> = [];
 
-    // 按批次处理
     const batches = chunkArray(sessions, this.config.batchSize);
-    let totalPromptTokens = 0;
-    let totalCompletionTokens = 0;
 
     for (let i = 0; i < batches.length; i++) {
-      logger.info(`处理批次 ${i + 1}/${batches.length} (${batches[i].length} 个会话)`);
+      logger.info(`分类批次 ${i + 1}/${batches.length} (${batches[i].length} 个会话)`);
 
       const limit = pLimit(this.config.concurrencyLimit);
       const batchResults = await Promise.all(
-        batches[i].map((session) =>
+        batches[i].map((session, idx) =>
           limit(async () => {
             try {
-              const result = await this.analyzeSingleSession(session);
+              const result = await this.classifySingleSession(session);
+              return { type: 'success' as const, index: i * this.config.batchSize + idx, result };
+            } catch (err) {
+              const reason = err instanceof Error ? err.message : String(err);
+              const retryable = this.isRetryableError(err);
+              return { type: 'failed' as const, index: i * this.config.batchSize + idx, talkerId: session.talkerId, reason, retryable };
+            }
+          }),
+        ),
+      );
+
+      for (const r of batchResults) {
+        if (r.type === 'success') {
+          results[r.index] = r.result;
+        } else {
+          failed.push({ talkerId: r.talkerId, reason: r.reason, retryable: r.retryable });
+          // 失败时填充默认值
+          results[r.index] = {
+            isCustomer: false,
+            confidence: 0,
+            reasoning: `分类失败: ${r.reason}`,
+          };
+        }
+      }
+    }
+
+    return { results, failed };
+  }
+
+  /**
+   * 对单个会话进行分类
+   */
+  private async classifySingleSession(session: NormalizedSession): Promise<ContactClassification> {
+    const context = this.buildSessionContext(session);
+    const compressedContext = this.compressContextIfNeeded(context, session);
+
+    const rawOutput = await this.callLLMRaw(compressedContext, CLASSIFICATION_PROMPT, false);
+
+    let parsed: Partial<ContactClassification>;
+    try {
+      parsed = JSON.parse(rawOutput);
+    } catch {
+      const jsonMatch = rawOutput.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        parsed = JSON.parse(jsonMatch[0]);
+      } else {
+        throw new Error('分类输出不是有效的JSON');
+      }
+    }
+
+    // 校验
+    if (this.config.validation.enableRangeCheck) {
+      validateClassification(parsed);
+    }
+
+    return {
+      isCustomer: parsed.isCustomer ?? false,
+      customerType: parsed.customerType,
+      subType: parsed.subType,
+      confidence: parsed.confidence ?? 0.5,
+      reasoning: parsed.reasoning ?? '',
+    };
+  }
+
+  /**
+   * 阶段2: 批量关键信息提取
+   */
+  private async extractCustomerInfo(
+    sessions: NormalizedSession[],
+    classifications: ContactClassification[],
+  ): Promise<{
+    results: SessionAnalysis[];
+    failed: Array<{ talkerId: string; reason: string; retryable: boolean }>;
+  }> {
+    const results: SessionAnalysis[] = [];
+    const failed: Array<{ talkerId: string; reason: string; retryable: boolean }> = [];
+
+    const batches = chunkArray(sessions, this.config.batchSize);
+
+    for (let i = 0; i < batches.length; i++) {
+      logger.info(`提取批次 ${i + 1}/${batches.length} (${batches[i].length} 个会话)`);
+
+      const limit = pLimit(this.config.concurrencyLimit);
+      const batchResults = await Promise.all(
+        batches[i].map((session, idx) =>
+          limit(async () => {
+            const globalIdx = i * this.config.batchSize + idx;
+            const classification = classifications[globalIdx];
+            try {
+              const result = await this.extractSingleSession(session, classification);
               return { type: 'success' as const, result };
             } catch (err) {
               const reason = err instanceof Error ? err.message : String(err);
@@ -63,68 +265,95 @@ export class Analyzer {
 
       for (const r of batchResults) {
         if (r.type === 'success') {
-          success.push(r.result);
-          totalPromptTokens += r.result.model.includes('fallback') ? 0 : 1000; // 估算
-          totalCompletionTokens += r.result.model.includes('fallback') ? 0 : 500;
+          results.push(r.result);
         } else {
           failed.push({ talkerId: r.talkerId, reason: r.reason, retryable: r.retryable });
         }
       }
     }
 
-    const totalDurationMs = Date.now() - startTime;
-    const avgDurationMs = success.length > 0 ? Math.round(totalDurationMs / success.length) : 0;
+    return { results, failed };
+  }
 
-    logger.info(
-      `分析层完成: 成功 ${success.length}/${sessions.length}, 失败 ${failed.length}, 耗时 ${totalDurationMs}ms`,
-    );
+  /**
+   * 对单个客户会话提取关键信息
+   */
+  private async extractSingleSession(
+    session: NormalizedSession,
+    classification: ContactClassification,
+  ): Promise<SessionAnalysis> {
+    const context = this.buildSessionContext(session);
+    const compressedContext = this.compressContextIfNeeded(context, session);
+
+    const prompt =
+      classification.customerType === 'b2b' ? B2B_EXTRACTION_PROMPT : B2C_EXTRACTION_PROMPT;
+
+    const rawOutput = await this.callLLMRaw(compressedContext, prompt, false);
+
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = JSON.parse(rawOutput);
+    } catch {
+      const jsonMatch = rawOutput.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        parsed = JSON.parse(jsonMatch[0]);
+      } else {
+        parsed = {};
+      }
+    }
+
+    // 校验
+    if (
+      this.config.validation.enableRangeCheck &&
+      classification.customerType
+    ) {
+      validateCustomerInfo(parsed, classification.customerType);
+    }
+
+    const customerInfo =
+      classification.customerType === 'b2b'
+        ? (parsed as B2BCustomerInfo)
+        : (parsed as B2CCustomerInfo);
 
     return {
-      success,
-      failed,
-      stats: {
-        totalSessions: sessions.length,
-        successCount: success.length,
-        failCount: failed.length,
-        totalDurationMs,
-        avgDurationMs,
-        tokenUsage: {
-          prompt: totalPromptTokens,
-          completion: totalCompletionTokens,
-        },
-      },
+      talkerId: session.talkerId,
+      talkerName: session.name,
+      classification,
+      customerInfo,
+      keyInsights: this.generateKeyInsights(classification, customerInfo),
+      lastActiveAt: session.timeRange.end,
+      messageCount: session.messages.length,
+      analyzedAt: new Date().toISOString(),
+      model: this.config.llm.primaryModel,
     };
   }
 
   /**
-   * 分析单个会话
+   * 生成关键洞察摘要
    */
-  private async analyzeSingleSession(session: NormalizedSession): Promise<SessionAnalysis> {
-    // 1. 构建分析上下文
-    const context = this.buildSessionContext(session);
+  private generateKeyInsights(
+    classification: ContactClassification,
+    customerInfo: B2BCustomerInfo | B2CCustomerInfo,
+  ): string[] {
+    const insights: string[] = [];
 
-    // 2. 检查是否需要上下文压缩
-    const compressedContext = this.compressContextIfNeeded(context, session);
-
-    // 3. 调用主模型
-    try {
-      const result = await this.callLLM(compressedContext, session, false);
-      return result;
-    } catch (err) {
-      logger.warn(`主模型分析失败，尝试降级: ${session.talkerId}`);
-      // 4. 降级至备用模型
-      if (this.config.llm.fallbackModel) {
-        try {
-          const fallbackResult = await this.callLLM(compressedContext, session, true);
-          return fallbackResult;
-        } catch (fallbackErr) {
-          throw new Error(
-            `主模型与备用模型均失败: ${err instanceof Error ? err.message : String(err)}`,
-          );
-        }
-      }
-      throw err;
+    if (classification.customerType === 'b2b') {
+      const info = customerInfo as B2BCustomerInfo;
+      if (info.companyName) insights.push(`公司: ${info.companyName}`);
+      if (info.contactRole) insights.push(`角色: ${info.contactRole}`);
+      if (info.demandType) insights.push(`需求: ${info.demandType}`);
+      if (info.urgency) insights.push(`紧急度: ${info.urgency}`);
+      if (info.followUpStatus) insights.push(`跟进: ${info.followUpStatus}`);
+    } else {
+      const info = customerInfo as B2CCustomerInfo;
+      if (info.examType) insights.push(`考试: ${info.examType}`);
+      if (info.demandType) insights.push(`需求: ${info.demandType}`);
+      if (info.major) insights.push(`专业: ${info.major}`);
+      if (info.region) insights.push(`地区: ${info.region}`);
+      if (info.followUpStatus) insights.push(`跟进: ${info.followUpStatus}`);
     }
+
+    return insights;
   }
 
   /**
@@ -140,7 +369,7 @@ export class Analyzer {
 
     for (const msg of session.messages) {
       const sender = msg.senderInfo?.nickname || msg.senderInfo?.remark || msg.senderId;
-      const direction = msg.isSelf ? '[销售]' : '[客户]';
+      const direction = msg.isSelf ? '[我方]' : '[对方]';
       const time = new Date(msg.timestampMs).toLocaleString('zh-CN');
       lines.push(`${time} ${direction} ${sender}: ${msg.content}`);
     }
@@ -152,7 +381,6 @@ export class Analyzer {
    * 如果上下文超过阈值，执行压缩
    */
   private compressContextIfNeeded(context: string, session: NormalizedSession): string {
-    // 简单估算token数（中文字符按1.5token计）
     const estimatedTokens = context.length * 1.5;
 
     if (estimatedTokens <= this.config.compressionThreshold) {
@@ -162,7 +390,7 @@ export class Analyzer {
     logger.debug(`会话 ${session.talkerId} 需要上下文压缩`);
 
     const msgs = session.messages;
-    const keepCount = Math.floor(msgs.length * 0.15); // 保留首尾各15%
+    const keepCount = Math.floor(msgs.length * 0.15);
 
     const head = msgs.slice(0, keepCount);
     const tail = msgs.slice(-keepCount);
@@ -171,19 +399,17 @@ export class Analyzer {
     lines.push(`会话: ${session.name} (已压缩，显示 ${keepCount * 2}/${msgs.length} 条关键消息)`);
     lines.push('---');
 
-    // 开头
     for (const msg of head) {
       const sender = msg.senderInfo?.nickname || msg.senderId;
-      const direction = msg.isSelf ? '[销售]' : '[客户]';
+      const direction = msg.isSelf ? '[我方]' : '[对方]';
       lines.push(`${direction} ${sender}: ${msg.content}`);
     }
 
     lines.push('[... 中间消息已压缩 ...]');
 
-    // 结尾
     for (const msg of tail) {
       const sender = msg.senderInfo?.nickname || msg.senderId;
-      const direction = msg.isSelf ? '[销售]' : '[客户]';
+      const direction = msg.isSelf ? '[我方]' : '[对方]';
       lines.push(`${direction} ${sender}: ${msg.content}`);
     }
 
@@ -191,16 +417,15 @@ export class Analyzer {
   }
 
   /**
-   * 调用LLM
+   * 调用LLM，返回原始文本输出
    */
-  private async callLLM(
+  private async callLLMRaw(
     context: string,
-    session: NormalizedSession,
+    prompt: string,
     isFallback: boolean,
-  ): Promise<SessionAnalysis> {
+  ): Promise<string> {
     const llm = this.config.llm;
     const model = isFallback ? llm.fallbackModel! : llm.primaryModel;
-    const prompt = isFallback ? FALLBACK_PROMPT : ANALYSIS_PROMPT;
 
     const response = await axios.post(
       llm.apiEndpoint,
@@ -222,63 +447,7 @@ export class Analyzer {
       },
     );
 
-    const rawOutput = response.data.choices?.[0]?.message?.content || '';
-
-    // 解析JSON输出
-    let parsed: Partial<SessionAnalysis>;
-    try {
-      parsed = JSON.parse(rawOutput);
-    } catch {
-      // 尝试从文本中提取JSON
-      const jsonMatch = rawOutput.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        parsed = JSON.parse(jsonMatch[0]);
-      } else {
-        throw new Error('LLM输出不是有效的JSON');
-      }
-    }
-
-    // 输出校验
-    if (!isFallback && this.config.validation.enableRangeCheck) {
-      validateAnalysisOutput(parsed);
-    }
-
-    return this.buildSessionAnalysis(parsed, session, model);
-  }
-
-  /**
-   * 构建完整的SessionAnalysis对象
-   */
-  private buildSessionAnalysis(
-    parsed: Partial<SessionAnalysis>,
-    session: NormalizedSession,
-    model: string,
-  ): SessionAnalysis {
-    return {
-      talkerId: session.talkerId,
-      talkerName: session.name,
-      customerProfile: parsed.customerProfile || {
-        keyNeeds: [],
-        interactionHistory: '',
-      },
-      intentRating: parsed.intentRating || { score: 5, label: 'warm', reasoning: '' },
-      salesQuality: parsed.salesQuality || {
-        overallScore: 5,
-        responsiveness: 5,
-        discoveryDepth: 5,
-        valueClarity: 5,
-        objectionHandling: 5,
-        ctaEffectiveness: 5,
-        suggestions: [],
-      },
-      followUps: parsed.followUps || [],
-      sentimentTrends: parsed.sentimentTrends || [],
-      riskFlags: parsed.riskFlags || [],
-      keyInsights: parsed.keyInsights || [],
-      summary: parsed.summary || '',
-      analyzedAt: new Date().toISOString(),
-      model,
-    };
+    return response.data.choices?.[0]?.message?.content || '';
   }
 
   /**

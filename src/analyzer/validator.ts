@@ -1,66 +1,73 @@
 /**
  * 分析输出校验器
- * 对LLM输出进行数值范围校验与一致性检查
+ * 对客户识别与分类的LLM输出进行校验
  */
 
-import { SessionAnalysis } from '../types';
+import { ContactClassification } from '../types';
 import { logger } from '../utils/logger';
 
 /**
- * 校验分析输出
- * 对关键字段进行范围校验与矛盾检测
+ * 校验分类输出
  */
-export function validateAnalysisOutput(output: Partial<SessionAnalysis>): void {
+export function validateClassification(output: Partial<ContactClassification>): void {
   const issues: string[] = [];
 
-  // 1. 数值范围校验
-  if (output.intentRating) {
-    const score = output.intentRating.score;
-    if (score === undefined || score < 1 || score > 10) {
-      issues.push(`意向评分超出范围: ${score}`);
+  // 1. 必填字段检查
+  if (typeof output.isCustomer !== 'boolean') {
+    issues.push('isCustomer 必须是布尔值');
+  }
+
+  // 2. 置信度范围校验
+  if (output.confidence !== undefined) {
+    if (output.confidence < 0 || output.confidence > 1) {
+      issues.push(`置信度超出范围: ${output.confidence}`);
     }
   }
 
-  if (output.salesQuality) {
-    const sq = output.salesQuality;
-    const scores = [
-      sq.overallScore,
-      sq.responsiveness,
-      sq.discoveryDepth,
-      sq.valueClarity,
-      sq.objectionHandling,
-      sq.ctaEffectiveness,
-    ];
-    for (const s of scores) {
-      if (s === undefined || s < 1 || s > 10) {
-        issues.push(`销售质量评分超出范围: ${s}`);
-      }
+  // 3. 客户类型一致性检查
+  if (output.isCustomer) {
+    if (!output.customerType || !['b2b', 'b2c'].includes(output.customerType)) {
+      issues.push('已识别为客户但 customerType 无效');
+    }
+  } else {
+    if (output.customerType) {
+      issues.push('非客户不应有 customerType');
     }
   }
 
-  // 2. 一致性检查
-  // 检查：客户表达强烈购买意愿但意向评级为低
-  if (output.customerProfile?.keyNeeds?.length && output.intentRating) {
-    const keyNeeds = output.customerProfile.keyNeeds.join('');
-    const hasStrongIntent =
-      /签约|合同|付款|购买|下单|合作|确定|定下来/.test(keyNeeds);
-    if (hasStrongIntent && output.intentRating.score <= 3) {
-      issues.push('检测到矛盾：客户表达购买意愿但意向评级为cold');
-    }
-  }
-
-  // 检查：意向评级label与score不匹配
-  if (output.intentRating) {
-    const { score, label } = output.intentRating;
-    const expectedLabel =
-      score <= 3 ? 'cold' : score <= 6 ? 'warm' : score <= 9 ? 'hot' : 'closed';
-    if (label && label !== expectedLabel) {
-      issues.push(`意向评级label不匹配: score=${score}, label=${label}, 期望=${expectedLabel}`);
-    }
-  }
-
-  // 3. 输出异常但不中断，记录日志
   if (issues.length > 0) {
-    logger.warn('LLM输出校验发现问题', { issues });
+    logger.warn('分类输出校验发现问题', { issues });
+  }
+}
+
+/**
+ * 校验客户信息提取输出
+ */
+export function validateCustomerInfo(output: Record<string, unknown>, type: 'b2b' | 'b2c'): void {
+  const issues: string[] = [];
+
+  if (type === 'b2b') {
+    // B端字段类型校验
+    if (output.urgency && !['high', 'medium', 'low'].includes(output.urgency as string)) {
+      issues.push(`B端紧急程度无效: ${output.urgency}`);
+    }
+    if (output.followUpStatus && !['new', 'contacted', 'quoted', 'negotiating', 'closed'].includes(output.followUpStatus as string)) {
+      issues.push(`B端跟进状态无效: ${output.followUpStatus}`);
+    }
+    if (output.projectTypes && !Array.isArray(output.projectTypes)) {
+      issues.push('B端 projectTypes 必须是数组');
+    }
+  } else {
+    // C端字段类型校验
+    if (output.followUpStatus && !['new', 'interested', 'purchased', 'inactive'].includes(output.followUpStatus as string)) {
+      issues.push(`C端跟进状态无效: ${output.followUpStatus}`);
+    }
+    if (output.purchaseHistory && !Array.isArray(output.purchaseHistory)) {
+      issues.push('C端 purchaseHistory 必须是数组');
+    }
+  }
+
+  if (issues.length > 0) {
+    logger.warn('客户信息提取输出校验发现问题', { issues });
   }
 }

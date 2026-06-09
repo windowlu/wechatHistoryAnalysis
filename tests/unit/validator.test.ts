@@ -1,70 +1,91 @@
 /**
- * 分析输出校验器单元测试
+ * 客户识别校验器单元测试
  */
 
-import { validateAnalysisOutput } from '../../src/analyzer/validator';
-import { SessionAnalysis } from '../../src/types';
+import { validateClassification, validateCustomerInfo } from '../../src/analyzer/validator';
+import { ContactClassification } from '../../src/types';
 
-describe('validateAnalysisOutput', () => {
-  it('应通过有效的完整输出', () => {
-    const validOutput: Partial<SessionAnalysis> = {
-      intentRating: {
-        score: 7,
-        label: 'hot',
-        reasoning: '客户明确询问价格',
-      },
-      salesQuality: {
-        overallScore: 8,
-        responsiveness: 9,
-        discoveryDepth: 7,
-        valueClarity: 8,
-        objectionHandling: 7,
-        ctaEffectiveness: 8,
-        suggestions: [],
-      },
+describe('validateClassification', () => {
+  it('应通过有效的客户分类', () => {
+    const valid: Partial<ContactClassification> = {
+      isCustomer: true,
+      customerType: 'b2b',
+      subType: '公司法人',
+      confidence: 0.95,
+      reasoning: '客户询问建筑资质申报',
     };
 
-    expect(() => validateAnalysisOutput(validOutput)).not.toThrow();
+    expect(() => validateClassification(valid)).not.toThrow();
   });
 
-  it('应标记超出范围的评分', () => {
-    const invalidOutput: Partial<SessionAnalysis> = {
-      intentRating: {
-        score: 15, // 超出1-10范围
-        label: 'hot',
-        reasoning: '',
-      },
+  it('应通过有效的非客户分类', () => {
+    const valid: Partial<ContactClassification> = {
+      isCustomer: false,
+      confidence: 0.9,
+      reasoning: '日常闲聊',
     };
 
-    expect(() => validateAnalysisOutput(invalidOutput)).not.toThrow();
-    // 校验器仅记录日志，不抛出异常
+    expect(() => validateClassification(valid)).not.toThrow();
   });
 
-  it('应检测到label与score不匹配', () => {
-    const inconsistentOutput: Partial<SessionAnalysis> = {
-      intentRating: {
-        score: 2,
-        label: 'hot', // score=2应为cold
-        reasoning: '',
-      },
+  it('应标记超出范围的置信度', () => {
+    const invalid: Partial<ContactClassification> = {
+      isCustomer: true,
+      confidence: 1.5,
     };
 
-    expect(() => validateAnalysisOutput(inconsistentOutput)).not.toThrow();
+    expect(() => validateClassification(invalid)).not.toThrow();
   });
 
-  it('应检测到购买意愿与低评级的矛盾', () => {
-    const contradictoryOutput: Partial<SessionAnalysis> = {
-      customerProfile: {
-        keyNeeds: ['准备签约', '合同条款确认'],
-        interactionHistory: '',
-      },
-      intentRating: {
-        score: 2,
-        label: 'cold',
-        reasoning: '',
-      },
+  it('应检测到客户类型不一致', () => {
+    const inconsistent: Partial<ContactClassification> = {
+      isCustomer: true,
+      customerType: undefined,
+      confidence: 0.8,
     };
 
-    expect(() => validateAnalysisOutput(contradictoryOutput)).not.toThrow();
+    expect(() => validateClassification(inconsistent)).not.toThrow();
+  });
+});
+
+describe('validateCustomerInfo', () => {
+  it('应通过有效的B端客户信息', () => {
+    const info = {
+      companyName: 'XX建筑公司',
+      demandType: '建筑资质申报',
+      urgency: 'high',
+      followUpStatus: 'quoted',
+      projectTypes: ['建筑资质', '安许'],
+    };
+
+    expect(() => validateCustomerInfo(info, 'b2b')).not.toThrow();
+  });
+
+  it('应通过有效的C端客户信息', () => {
+    const info = {
+      name: '张三',
+      examType: '二级建造师',
+      demandType: '题库',
+      followUpStatus: 'interested',
+      purchaseHistory: ['2025年二建题库'],
+    };
+
+    expect(() => validateCustomerInfo(info, 'b2c')).not.toThrow();
+  });
+
+  it('应标记无效的B端跟进状态', () => {
+    const info = {
+      followUpStatus: 'invalid_status',
+    };
+
+    expect(() => validateCustomerInfo(info, 'b2b')).not.toThrow();
+  });
+
+  it('应标记无效的C端跟进状态', () => {
+    const info = {
+      followUpStatus: 'closed',
+    };
+
+    expect(() => validateCustomerInfo(info, 'b2c')).not.toThrow();
   });
 });
