@@ -1,5 +1,5 @@
 appId: com.yourcompany.wechat-analysis
-productName: 微信聊天记录分析工具
+productName: 微信客户识别系统
 directories:
   output: release
 copyright: Copyright © 2026
@@ -17,7 +17,7 @@ asarUnpack:
   - node_modules/file-uri-to-path/**/*
 npmRebuild: true
 win:
-  executableName: WechatAnalysis
+  executableName: WechatCustomerID
   target:
     - target: portable
       arch:
@@ -31,7 +31,7 @@ nsis:
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
   createStartMenuShortcut: true
-  shortcutName: 微信聊天记录分析工具
+  shortcutName: 微信客户识别系统
   artifactName: '${productName}-Setup-${version}.${ext}'
 portable:
   artifactName: '${productName}-Portable-${version}.${ext}'
