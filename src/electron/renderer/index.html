@@ -22,41 +22,19 @@
         <div class="form-group">
           <label for="data-path">微信数据目录</label>
           <div class="input-with-button">
-            <input type="text" id="data-path" placeholder="选择微信数据目录（包含 wxid_xxx 文件夹）">
+            <input type="text" id="data-path" placeholder="留空将自动检测，或手动选择包含 wxid_xxx 文件夹的目录">
             <button id="btn-browse-data" class="btn-secondary">浏览</button>
           </div>
-          <span class="hint">Windows 默认在 Documents\WeChat Files 下</span>
+          <span class="hint">留空时自动检测；微信数据通常包含 wxid_xxx 账号文件夹</span>
         </div>
 
-        <div class="form-group">
-          <label for="llm-provider">LLM 服务商</label>
-          <select id="llm-provider">
-            <option value="openai">OpenAI</option>
-            <option value="anthropic">Anthropic</option>
-            <option value="local">本地模型</option>
-            <option value="custom">自定义</option>
-          </select>
-        </div>
-
-        <div class="form-group">
-          <label for="api-endpoint">API 端点</label>
-          <input type="text" id="api-endpoint" placeholder="https://api.openai.com/v1/chat/completions">
-        </div>
-
-        <div class="form-group">
-          <label for="api-key">API Key</label>
-          <input type="password" id="api-key" placeholder="sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx">
-        </div>
-
-        <div class="form-row">
-          <div class="form-group half">
-            <label for="primary-model">主模型</label>
-            <input type="text" id="primary-model" placeholder="gpt-4o" value="gpt-4o">
+        <div class="form-group static-info">
+          <label>大语言模型</label>
+          <div class="static-value">
+            <span class="provider-badge">Kimi（Moonshot）</span>
+            <span class="model-name">kimi-k2-6</span>
           </div>
-          <div class="form-group half">
-            <label for="fallback-model">备用模型</label>
-            <input type="text" id="fallback-model" placeholder="gpt-4o-mini" value="gpt-4o-mini">
-          </div>
+          <span class="hint">模型配置已内置，无需手动填写 API Key 或选择服务商</span>
         </div>
       </section>
 
@@ -82,6 +60,14 @@
           <div class="form-group half">
             <label for="min-confidence">最低置信度 (0-1)</label>
             <input type="number" id="min-confidence" value="0.6" min="0" max="1" step="0.1">
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group half">
+            <label for="lookback-days">最近 N 天有聊天</label>
+            <input type="number" id="lookback-days" value="7" min="0" max="365" step="1">
+            <span class="hint">0 表示全量分析</span>
           </div>
         </div>
       </section>

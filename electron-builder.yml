@@ -5,6 +5,7 @@ directories:
 copyright: Copyright © 2026
 files:
   - dist/**/*
+  - config.json
   - '!dist/**/*.d.ts'
   - '!dist/**/*.d.ts.map'
   - '!dist/**/*.js.map'

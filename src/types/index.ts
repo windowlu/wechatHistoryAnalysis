@@ -333,7 +333,7 @@ export interface SessionAnalysis {
 /** LLM配置 */
 export interface LLMConfig {
   /** 提供商 */
-  provider: 'openai' | 'anthropic' | 'local' | 'custom';
+  provider: 'openai' | 'anthropic' | 'local' | 'custom' | 'kimi';
   /** API端点 */
   apiEndpoint: string;
   /** API密钥 */
@@ -360,6 +360,8 @@ export interface ClassificationConfig {
   minConfidence: number;
   /** 目标客户类型（null=全部） */
   targetCustomerType?: 'b2b' | 'b2c';
+  /** 只分析最近 N 天内有聊天的会话（0 或空表示全量） */
+  lookbackDays?: number;
 }
 
 /** 分析层配置 */

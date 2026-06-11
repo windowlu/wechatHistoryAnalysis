@@ -24,12 +24,12 @@
   },
   "analyzer": {
     "llm": {
-      "provider": "openai",
-      "apiEndpoint": "https://api.openai.com/v1/chat/completions",
+      "provider": "kimi",
+      "apiEndpoint": "https://api.moonshot.cn/v1/chat/completions",
       "apiKey": "sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
-      "primaryModel": "gpt-4o",
-      "fallbackModel": "gpt-4o-mini",
-      "maxContextLength": 8000,
+      "primaryModel": "kimi-k2-6",
+      "fallbackModel": "kimi-k2-6",
+      "maxContextLength": 32000,
       "temperature": 0.3,
       "timeoutMs": 120000,
       "maxRetries": 2

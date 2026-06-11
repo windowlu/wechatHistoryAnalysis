@@ -6,6 +6,7 @@ pnpm-lock.yaml
 
 # Build output
 dist/
+release/
 *.tsbuildinfo
 
 # Output directories
@@ -13,10 +14,11 @@ output/
 temp/
 logs/
 
-# Environment
+# Environment & local config
 .env
 .env.local
 .env.*.local
+config.json
 
 # IDE
 .idea/

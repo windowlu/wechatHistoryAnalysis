@@ -109,6 +109,34 @@ body {
   flex: 1;
 }
 
+.form-group.static-info .static-value {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 14px;
+}
+
+.form-group.static-info .provider-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  background: rgba(7, 193, 96, 0.12);
+  color: var(--primary);
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.form-group.static-info .model-name {
+  color: var(--text-primary);
+  font-weight: 500;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
 label {
   display: block;
   font-size: 13px;
@@ -141,6 +169,19 @@ select:focus {
 
 input::placeholder {
   color: var(--text-muted);
+}
+
+input[readonly],
+input.readonly-field {
+  background: var(--bg);
+  color: var(--text-secondary);
+  cursor: not-allowed;
+}
+
+input[readonly]:focus,
+input.readonly-field:focus {
+  border-color: var(--border);
+  box-shadow: none;
 }
 
 .input-with-button {

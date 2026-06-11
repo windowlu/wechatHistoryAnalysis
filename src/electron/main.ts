@@ -33,7 +33,8 @@ function createWindow(): void {
   });
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  await ensureUserConfig();
   createWindow();
 
   app.on('activate', () => {
@@ -42,6 +43,47 @@ app.whenReady().then(() => {
     }
   });
 });
+
+/**
+ * 首次运行时，将打包内置的 config.json 复制到用户数据目录，
+ * 保证便携版/发行版启动时已经带有默认配置（含内置 API Key）。
+ */
+async function ensureUserConfig(): Promise<void> {
+  const userConfigPath = path.join(app.getPath('userData'), 'config.json');
+  if (await fs.pathExists(userConfigPath)) return;
+
+  const bundledConfigPath = await findBundledConfigPath();
+  if (!bundledConfigPath) {
+    logger.warn('未找到内置 config.json，将使用空配置启动');
+    return;
+  }
+
+  try {
+    await fs.ensureDir(app.getPath('userData'));
+    await fs.copyFile(bundledConfigPath, userConfigPath);
+    logger.info('已复制内置配置到用户数据目录', { userConfigPath });
+  } catch (error) {
+    logger.error('复制内置配置失败', { error });
+  }
+}
+
+/** 在开发/生产不同布局下定位打包内置的 config.json */
+async function findBundledConfigPath(): Promise<string | null> {
+  const candidates = [
+    // 开发环境：dist/electron/main.js 的 __dirname 上一级再上一级为项目根目录
+    path.join(__dirname, '..', '..', 'config.json'),
+    // 生产环境（asar/unpacked）：config.json 与 electron 目录同级
+    path.join(__dirname, '..', 'config.json'),
+    // 生产环境备选
+    path.join(process.resourcesPath, 'app.asar', 'config.json'),
+    path.join(process.resourcesPath, 'app', 'config.json'),
+  ];
+
+  for (const candidate of candidates) {
+    if (await fs.pathExists(candidate)) return candidate;
+  }
+  return null;
+}
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {

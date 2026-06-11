@@ -36,14 +36,10 @@ const els = {
   // 配置页
   dataPath: $('data-path'),
   btnBrowseData: $('btn-browse-data'),
-  llmProvider: $('llm-provider'),
-  apiEndpoint: $('api-endpoint'),
-  apiKey: $('api-key'),
-  primaryModel: $('primary-model'),
-  fallbackModel: $('fallback-model'),
   filterNonCustomers: $('filter-non-customers'),
   targetCustomerType: $('target-customer-type'),
   minConfidence: $('min-confidence'),
+  lookbackDays: $('lookback-days'),
   decryptToolType: $('decrypt-tool-type'),
   pythonPath: $('python-path'),
   concurrency: $('concurrency'),
@@ -116,12 +112,12 @@ function buildConfig() {
     },
     analyzer: {
       llm: {
-        provider: els.llmProvider.value,
-        apiEndpoint: els.apiEndpoint.value || 'https://api.openai.com/v1/chat/completions',
-        apiKey: els.apiKey.value,
-        primaryModel: els.primaryModel.value || 'gpt-4o',
-        fallbackModel: els.fallbackModel.value || 'gpt-4o-mini',
-        maxContextLength: 8000,
+        provider: 'kimi',
+        apiEndpoint: 'https://api.moonshot.cn/v1/chat/completions',
+        apiKey: currentConfig?.analyzer?.llm?.apiKey || '',
+        primaryModel: 'kimi-k2-6',
+        fallbackModel: 'kimi-k2-6',
+        maxContextLength: 32000,
         temperature: 0.3,
         timeoutMs: 120000,
         maxRetries: 2,
@@ -134,6 +130,7 @@ function buildConfig() {
         filterNonCustomers: els.filterNonCustomers.checked,
         minConfidence: parseFloat(els.minConfidence.value) || 0.6,
         targetCustomerType: els.targetCustomerType.value || undefined,
+        lookbackDays: parseInt(els.lookbackDays.value, 10) || 7,
       },
       validation: {
         enableRangeCheck: true,
@@ -153,16 +150,12 @@ function buildConfig() {
 function loadConfigIntoForm(config) {
   if (!config) return;
   if (config.extractor?.customDataPath) els.dataPath.value = config.extractor.customDataPath;
-  if (config.analyzer?.llm?.provider) els.llmProvider.value = config.analyzer.llm.provider;
-  if (config.analyzer?.llm?.apiEndpoint) els.apiEndpoint.value = config.analyzer.llm.apiEndpoint;
-  if (config.analyzer?.llm?.apiKey) els.apiKey.value = config.analyzer.llm.apiKey;
-  if (config.analyzer?.llm?.primaryModel) els.primaryModel.value = config.analyzer.llm.primaryModel;
-  if (config.analyzer?.llm?.fallbackModel) els.fallbackModel.value = config.analyzer.llm.fallbackModel;
   if (config.analyzer?.classification) {
     const cls = config.analyzer.classification;
     if (typeof cls.filterNonCustomers === 'boolean') els.filterNonCustomers.checked = cls.filterNonCustomers;
     if (cls.minConfidence !== undefined) els.minConfidence.value = cls.minConfidence;
     if (cls.targetCustomerType) els.targetCustomerType.value = cls.targetCustomerType;
+    if (cls.lookbackDays !== undefined) els.lookbackDays.value = cls.lookbackDays;
   }
   if (config.decryptor?.toolType) els.decryptToolType.value = config.decryptor.toolType;
   if (config.decryptor?.pythonPath) els.pythonPath.value = config.decryptor.pythonPath;
@@ -194,15 +187,6 @@ els.collapsibleHeader.addEventListener('click', () => {
 });
 
 els.btnStart.addEventListener('click', async () => {
-  if (!els.dataPath.value) {
-    showError('请选择微信数据目录');
-    return;
-  }
-  if (!els.apiKey.value) {
-    showError('请输入 API Key');
-    return;
-  }
-
   await saveCurrentConfig();
   startAnalysis();
 });

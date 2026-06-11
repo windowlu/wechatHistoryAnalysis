@@ -27,6 +27,33 @@ import {
 } from './prompts';
 import { validateClassification, validateCustomerInfo } from './validator';
 
+/**
+ * 按最近 N 天有聊天过滤会话
+ * @param sessions 会话列表
+ * @param lookbackDays 最近 N 天；<= 0 表示不过滤
+ * @param now 基准时间（用于测试注入）
+ * @returns 过滤后的会话列表
+ */
+export function filterSessionsByRecentActivity(
+  sessions: NormalizedSession[],
+  lookbackDays: number,
+  now: number = Date.now(),
+): NormalizedSession[] {
+  if (lookbackDays <= 0) {
+    logger.info('lookbackDays 为 0，分析全部会话');
+    return sessions;
+  }
+
+  const cutoffMs = now - lookbackDays * 24 * 60 * 60 * 1000;
+  const filtered = sessions.filter((session) => {
+    const lastMessageMs = new Date(session.timeRange.end).getTime();
+    return lastMessageMs >= cutoffMs;
+  });
+
+  logger.info(`按最近 ${lookbackDays} 天过滤会话: ${sessions.length} -> ${filtered.length}`);
+  return filtered;
+}
+
 // 动态导入p-limit以避免ESM/CJS兼容问题
 let pLimit: (concurrency: number) => <T>(fn: () => Promise<T>) => Promise<T>;
 try {
@@ -52,11 +79,14 @@ export class Analyzer {
     logger.info(`分析层: 开始分析 ${sessions.length} 个会话`);
     const startTime = Date.now();
 
+    // 按最近 N 天过滤会话
+    const filteredSessions = this.filterSessionsByLookbackDays(sessions);
+
     // ═══════════════════════════════════════════════════════
     // 阶段1: 客户识别分类
     // ═══════════════════════════════════════════════════════
     logger.info('阶段1: 客户识别分类');
-    const classificationResult = await this.classifySessions(sessions);
+    const classificationResult = await this.classifySessions(filteredSessions);
 
     const customerClassifications = classificationResult.results;
     const classifyFailed = classificationResult.failed;
@@ -65,7 +95,7 @@ export class Analyzer {
     const customerCount = customerClassifications.filter((c) => c.isCustomer).length;
     const b2bCount = customerClassifications.filter((c) => c.customerType === 'b2b').length;
     const b2cCount = customerClassifications.filter((c) => c.customerType === 'b2c').length;
-    const nonCustomerCount = sessions.length - customerCount;
+    const nonCustomerCount = filteredSessions.length - customerCount;
 
     logger.info(
       `分类完成: 客户 ${customerCount} (B端 ${b2bCount}, C端 ${b2cCount}), 非客户 ${nonCustomerCount}, 失败 ${classifyFailed.length}`,
@@ -78,7 +108,7 @@ export class Analyzer {
     const customerSessions: NormalizedSession[] = [];
     const customerClassificationsList: ContactClassification[] = [];
 
-    for (let i = 0; i < sessions.length; i++) {
+    for (let i = 0; i < filteredSessions.length; i++) {
       const cls = customerClassifications[i];
       if (cls.isCustomer) {
         // 如果设置了目标客户类型过滤
@@ -86,7 +116,7 @@ export class Analyzer {
         if (targetType && cls.customerType !== targetType) {
           continue;
         }
-        customerSessions.push(sessions[i]);
+        customerSessions.push(filteredSessions[i]);
         customerClassificationsList.push(cls);
       }
     }
@@ -102,16 +132,16 @@ export class Analyzer {
 
     // 如果不过滤非客户，将非客户也加入结果（仅含分类信息）
     if (!this.config.classification.filterNonCustomers) {
-      for (let i = 0; i < sessions.length; i++) {
+      for (let i = 0; i < filteredSessions.length; i++) {
         const cls = customerClassifications[i];
         if (!cls.isCustomer) {
           success.push({
-            talkerId: sessions[i].talkerId,
-            talkerName: sessions[i].name,
+            talkerId: filteredSessions[i].talkerId,
+            talkerName: filteredSessions[i].name,
             classification: cls,
             keyInsights: [],
-            lastActiveAt: sessions[i].timeRange.end,
-            messageCount: sessions[i].messages.length,
+            lastActiveAt: filteredSessions[i].timeRange.end,
+            messageCount: filteredSessions[i].messages.length,
             analyzedAt: new Date().toISOString(),
             model: 'classification-only',
           });
@@ -123,14 +153,14 @@ export class Analyzer {
     const avgDurationMs = success.length > 0 ? Math.round(totalDurationMs / success.length) : 0;
 
     logger.info(
-      `分析层完成: 成功 ${success.length}/${sessions.length}, 分类失败 ${classifyFailed.length}, 提取失败 ${extractFailed.length}, 耗时 ${totalDurationMs}ms`,
+      `分析层完成: 成功 ${success.length}/${filteredSessions.length}, 分类失败 ${classifyFailed.length}, 提取失败 ${extractFailed.length}, 耗时 ${totalDurationMs}ms`,
     );
 
     return {
       success,
       failed: [...classifyFailed, ...extractFailed],
       stats: {
-        totalSessions: sessions.length,
+        totalSessions: filteredSessions.length,
         successCount: success.length,
         failCount: classifyFailed.length + extractFailed.length,
         customerCount,
@@ -141,6 +171,15 @@ export class Analyzer {
         avgDurationMs,
       },
     };
+  }
+
+  /**
+   * 按最近 N 天过滤会话
+   * 只保留最后一条消息时间在 N 天内的会话
+   */
+  private filterSessionsByLookbackDays(sessions: NormalizedSession[]): NormalizedSession[] {
+    const lookbackDays = this.config.classification.lookbackDays ?? 7;
+    return filterSessionsByRecentActivity(sessions, lookbackDays);
   }
 
   /**

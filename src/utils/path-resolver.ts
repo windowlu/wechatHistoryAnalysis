@@ -9,6 +9,7 @@ import * as path from 'path';
 import * as fs from 'fs-extra';
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import { logger } from './logger';
 
 const execAsync = promisify(exec);
 
@@ -90,6 +91,7 @@ async function detectFromIni(): Promise<string | null> {
   );
 
   if (!(await fs.pathExists(configDir))) {
+    logger.debug('微信 INI 配置目录不存在', { configDir });
     return null;
   }
 
@@ -101,7 +103,10 @@ async function detectFromIni(): Promise<string | null> {
     return null;
   }
 
-  if (iniFiles.length === 0) return null;
+  if (iniFiles.length === 0) {
+    logger.debug('微信 INI 配置目录中没有 .ini 文件', { configDir });
+    return null;
+  }
 
   for (const iniFile of iniFiles) {
     const iniPath = path.join(configDir, iniFile);
@@ -109,18 +114,23 @@ async function detectFromIni(): Promise<string | null> {
       // 微信的 INI 可能是二进制混合格式，先尝试 UTF-8 文本读取
       const content = await fs.readFile(iniPath, 'utf-8');
 
-      // 尝试匹配 WeChat Files 完整路径（如 D:\xxx\WeChat Files）
-      const fullPathMatch = content.match(/([A-Z]:\\[^\x00-\x1f*?"<>|]+\\WeChat Files)/i);
-      if (fullPathMatch) {
-        const candidate = fullPathMatch[1];
-        if (await fs.pathExists(candidate)) return candidate;
-      }
+      // 提取所有看起来像 Windows 绝对路径的字符串
+      const pathPattern = /([A-Z]:\\[^\x00-\x1f*?"<>|]+)/gi;
+      const candidates = Array.from(new Set(content.match(pathPattern) || []));
 
-      // 尝试匹配父目录路径，再拼接 WeChat Files
-      const parentMatch = content.match(/([A-Z]:\\[^\x00-\x1f*?"<>|]+)[\r\n\x00]/);
-      if (parentMatch) {
-        const candidate = path.join(parentMatch[1], 'WeChat Files');
-        if (await fs.pathExists(candidate)) return candidate;
+      for (const candidate of candidates) {
+        // 优先返回本身就是微信数据根目录的路径
+        if (await isWeChatDataRoot(candidate)) {
+          logger.debug('从 INI 中识别到微信数据根目录', { iniPath, candidate });
+          return candidate;
+        }
+
+        // 否则尝试拼接 WeChat Files
+        const withSubDir = path.join(candidate, 'WeChat Files');
+        if (await isWeChatDataRoot(withSubDir)) {
+          logger.debug('从 INI 中识别到 WeChat Files 子目录', { iniPath, withSubDir });
+          return withSubDir;
+        }
       }
     } catch {
       // 读取失败（二进制编码等），继续尝试下一个 INI
@@ -128,7 +138,22 @@ async function detectFromIni(): Promise<string | null> {
     }
   }
 
+  logger.debug('未能从 INI 中解析出有效的微信数据路径', { configDir });
   return null;
+}
+
+/**
+ * 判断一个目录是否是微信数据根目录（包含 wxid_ 账号文件夹）
+ */
+async function isWeChatDataRoot(candidate: string): Promise<boolean> {
+  if (!(await fs.pathExists(candidate))) return false;
+
+  try {
+    const entries = await fs.readdir(candidate, { withFileTypes: true });
+    return entries.some((e) => e.isDirectory() && e.name.startsWith('wxid_'));
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -138,14 +163,29 @@ async function detectFromRegistry(): Promise<string | null> {
   if (process.platform !== 'win32') return null;
 
   const fileSavePath = await queryRegistryValue('HKCU\\Software\\Tencent\\WeChat', 'FileSavePath');
-  if (!fileSavePath) return null;
+  if (!fileSavePath) {
+    logger.debug('注册表 FileSavePath 不存在');
+    return null;
+  }
+  logger.debug('从注册表读取到 FileSavePath', { fileSavePath });
 
-  // FileSavePath 通常是父目录，微信会在其下自动创建 "WeChat Files"
+  // 情况1：FileSavePath 直接指向微信数据根目录（如 D:\xwechat_files）
+  if (await isWeChatDataRoot(fileSavePath)) {
+    logger.debug('FileSavePath 本身就是微信数据根目录', { fileSavePath });
+    return fileSavePath;
+  }
+
+  // 情况2：FileSavePath 是父目录，微信在其下创建 "WeChat Files"
   const withSubDir = path.join(fileSavePath, 'WeChat Files');
-  if (await fs.pathExists(withSubDir)) return withSubDir;
+  if (await fs.pathExists(withSubDir)) {
+    logger.debug('从 FileSavePath 拼接 WeChat Files 成功', { withSubDir });
+    return withSubDir;
+  }
 
-  // 少数情况下用户直接指向了 WeChat Files 本身
-  if (await fs.pathExists(fileSavePath)) return fileSavePath;
+  // 情况3：FileSavePath 指向某个目录，但不是标准结构，仍可能可用
+  if (await fs.pathExists(fileSavePath)) {
+    logger.warn('注册表 FileSavePath 存在但不符合标准微信数据结构', { fileSavePath });
+  }
 
   return null;
 }
@@ -181,64 +221,129 @@ async function getDocumentsPath(): Promise<string> {
 }
 
 /**
- * 多盘符兜底搜索（最后手段）
+ * 获取 Windows 所有可用盘符（如 C:\, D:\）
+ */
+async function getAvailableDrives(): Promise<string[]> {
+  if (process.platform !== 'win32') return [];
+
+  try {
+    const { stdout } = await execAsync(
+      'wmic logicaldisk get name /format:csv 2>nul',
+      { encoding: 'utf8', windowsHide: true, timeout: 5000 }
+    );
+    const drives: string[] = [];
+    for (const line of stdout.split(/\r?\n/)) {
+      const trimmed = line.trim();
+      const match = trimmed.match(/^([A-Z]:)$/);
+      if (match) {
+        drives.push(match[1] + '\\');
+      }
+    }
+    return drives;
+  } catch {
+    // 兜底：只返回常见盘符
+    return ['C:\\', 'D:\\', 'E:\\'];
+  }
+}
+
+/**
+ * 多位置兜底搜索：基于目录内容特征（包含 wxid_ 账号文件夹）识别微信数据根目录
+ * 不再限定目录必须叫 "WeChat Files"
  */
 async function searchCommonLocations(): Promise<string | null> {
   if (process.platform !== 'win32') return null;
 
-  const candidates = [
+  const docsPath = await getDocumentsPath();
+
+  // 第一阶段：固定候选目录
+  const fixedCandidates = [
+    path.join(docsPath, 'WeChat Files'),
+    path.join(docsPath, 'xwechat_files'),
     path.join(os.homedir(), 'Documents', 'WeChat Files'),
     path.join(os.homedir(), 'WeChat Files'),
+    path.join(os.homedir(), 'xwechat_files'),
     'D:\\WeChat Files',
+    'D:\\xwechat_files',
     'D:\\Documents\\WeChat Files',
     'E:\\WeChat Files',
+    'E:\\xwechat_files',
     'E:\\Documents\\WeChat Files',
   ];
 
-  for (const candidate of candidates) {
-    if (!(await fs.pathExists(candidate))) continue;
+  for (const candidate of fixedCandidates) {
+    if (await isWeChatDataRoot(candidate)) {
+      logger.debug('在固定候选目录中找到微信数据根目录', { candidate });
+      return candidate;
+    }
+  }
 
-    // 确认目录下有 wxid_ 开头的账号文件夹，避免误匹配
+  // 第二阶段：扫描各盘符根目录下的一级子目录
+  const drives = await getAvailableDrives();
+  logger.debug('开始扫描盘符根目录下的微信数据目录', { drives });
+
+  for (const drive of drives) {
     try {
-      const entries = await fs.readdir(candidate);
-      if (entries.some((e) => e.startsWith('wxid_'))) {
-        return candidate;
+      const entries = await fs.readdir(drive, { withFileTypes: true });
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        const candidate = path.join(drive, entry.name);
+        if (await isWeChatDataRoot(candidate)) {
+          logger.debug('在盘符根目录子文件夹中找到微信数据根目录', { candidate });
+          return candidate;
+        }
       }
     } catch {
+      // 忽略无权限或不可读盘符
       continue;
     }
   }
 
+  logger.debug('所有固定候选和盘符扫描均未找到微信数据目录');
   return null;
 }
 
 /**
  * 智能检测默认的微信数据目录（Windows）
- * 检测优先级：INI配置 > 注册表 FileSavePath > KnownFolder/Documents > 多盘符搜索
+ * 检测优先级：INI配置 > 注册表 FileSavePath > KnownFolder/Documents > 多位置内容扫描
  */
 export async function getDefaultWeChatDataPath(): Promise<string> {
   if (process.platform !== 'win32') {
     return path.join(os.homedir(), '.wechat', 'data');
   }
 
+  logger.info('开始自动检测微信数据目录');
+
   // 1. 微信 INI 配置文件（部分版本里优先级高于注册表）
   const iniPath = await detectFromIni();
-  if (iniPath) return iniPath;
+  if (iniPath) {
+    logger.info('通过 INI 配置找到微信数据目录', { iniPath });
+    return iniPath;
+  }
 
   // 2. 注册表 FileSavePath
   const regPath = await detectFromRegistry();
-  if (regPath) return regPath;
+  if (regPath) {
+    logger.info('通过注册表找到微信数据目录', { regPath });
+    return regPath;
+  }
 
   // 3. 真实 Documents 目录
   const docsPath = await getDocumentsPath();
   const defaultPath = path.join(docsPath, 'WeChat Files');
-  if (await fs.pathExists(defaultPath)) return defaultPath;
+  if (await isWeChatDataRoot(defaultPath)) {
+    logger.info('通过 Documents 目录找到微信数据目录', { defaultPath });
+    return defaultPath;
+  }
 
-  // 4. 多盘符兜底搜索
+  // 4. 多位置兜底搜索
   const searched = await searchCommonLocations();
-  if (searched) return searched;
+  if (searched) {
+    logger.info('通过兜底扫描找到微信数据目录', { searched });
+    return searched;
+  }
 
   // 5. 最终 fallback：返回默认路径（即使不存在，让上层报出明确错误）
+  logger.warn('未能自动检测到微信数据目录，将返回默认路径由上层提示用户', { defaultPath });
   return defaultPath;
 }
 
@@ -250,8 +355,10 @@ export async function resolveWeChatDataPath(customDataPath?: string): Promise<st
   if (customDataPath) {
     const normalized = path.resolve(customDataPath);
     if (await fs.pathExists(normalized)) {
+      logger.info('使用用户指定的微信数据目录', { normalized });
       return normalized;
     }
+    logger.error('指定的微信数据目录不存在', { normalized });
     throw new Error(`指定的微信数据目录不存在: ${normalized}`);
   }
   return getDefaultWeChatDataPath();
